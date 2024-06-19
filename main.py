@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Dict, Optional
 import docker
 import os
 import base64
@@ -7,30 +8,79 @@ import tempfile
 import shutil
 
 app = FastAPI()
-client = docker.from_env()
+
+# 環境変数が設定されていない場合のデフォルト設定
+docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
+tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
+cert_path = os.getenv("DOCKER_CERT_PATH", None)
+
+if tls_verify == "1" and cert_path:
+    tls_config = docker.tls.TLSConfig(
+        client_cert=(
+            os.path.join(cert_path, "cert.pem"),
+            os.path.join(cert_path, "key.pem"),
+        ),
+        ca_cert=os.path.join(cert_path, "ca.pem"),
+        verify=True,
+    )
+    client = docker.DockerClient(base_url=docker_host, tls=tls_config)
+else:
+    client = docker.DockerClient(base_url=docker_host)
 
 
 class AuthConfig(BaseModel):
-    username: str
-    password: str
-    email: str = None
-    serveraddress: str = "https://index.docker.io/v1/"
+    username: str = Field(
+        ..., example="your-username", description="Docker registry username"
+    )
+    password: str = Field(
+        ..., example="your-password", description="Docker registry password"
+    )
+    email: Optional[str] = Field(
+        None, example="your-email@example.com", description="Docker registry email"
+    )
+    serveraddress: str = Field(
+        "https://index.docker.io/v1/",
+        example="https://index.docker.io/v1/",
+        description="Docker registry server address",
+    )
 
 
 class VolumeConfig(BaseModel):
-    content: str
+    content: str = Field(
+        ...,
+        example="base64encodedcontent",
+        description="Base64 encoded content for the volume",
+    )
 
 
 class RunContainerRequest(BaseModel):
-    image: str
-    command: list = None
-    entrypoint: str = None
-    env_vars: dict = {}
-    auth_config: AuthConfig = None
-    volumes: dict = {}
+    image: str = Field(..., example="alpine:latest", description="Docker image to run")
+    command: Optional[List[str]] = Field(
+        None,
+        example=["echo", "Hello, World!"],
+        description="Command to run in the container",
+    )
+    entrypoint: Optional[str] = Field(
+        None, example="/bin/sh", description="Entrypoint for the container"
+    )
+    env_vars: Dict[str, str] = Field(
+        {},
+        example={"MY_VAR": "value"},
+        description="Environment variables for the container",
+    )
+    auth_config: Optional[AuthConfig] = Field(
+        None, description="Authentication configuration for pulling the image"
+    )
+    volumes: Dict[str, VolumeConfig] = Field(
+        {}, description="Volumes to mount in the container"
+    )
 
 
-@app.post("/run")
+@app.post(
+    "/run",
+    summary="Run a Docker container",
+    description="Run a Docker container with the specified configuration",
+)
 async def run_container(request: RunContainerRequest):
     try:
         # Pull the image with authentication if provided
@@ -52,7 +102,7 @@ async def run_container(request: RunContainerRequest):
         for host_path, vol_info in request.volumes.items():
             container_path, *bind_options = host_path.split(":")
             bind_options = bind_options or ["rw"]
-            vol_content = vol_info["content"]
+            vol_content = vol_info.content
 
             temp_dir = tempfile.mkdtemp()
             temp_dirs.append(temp_dir)
