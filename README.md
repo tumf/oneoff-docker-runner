@@ -18,6 +18,12 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 - Uvicorn
 - Docker-py
 
+## Run
+
+```bash
+docker run -rm -p 8000:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner:main
+```
+
 ## Installation
 
 1. Clone the repository:
