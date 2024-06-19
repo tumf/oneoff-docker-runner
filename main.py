@@ -72,7 +72,33 @@ class RunContainerRequest(BaseModel):
         None, description="Authentication configuration for pulling the image"
     )
     volumes: Dict[str, VolumeConfig] = Field(
-        {}, description="Volumes to mount in the container"
+        {},
+        example={
+            "vol-1:/mnt/hoge.txt:ro": {
+                "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
+            },
+            "vol-2:/mnt/data": {
+                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA=="
+            },
+        },
+        description="Volumes to mount in the container",
+    )
+
+
+class RunContainerResponse(BaseModel):
+    status: str = Field(
+        ..., example="success", description="Status of the container run"
+    )
+    stdout: str = Field(
+        ..., example="Hello, World!\n", description="Standard output from the container"
+    )
+    stderr: str = Field(
+        ..., example="", description="Standard error output from the container"
+    )
+    volumes: Dict[str, str] = Field(
+        ...,
+        example={"/mnt/data": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA=="},
+        description="Contents of the volumes",
     )
 
 
@@ -80,6 +106,7 @@ class RunContainerRequest(BaseModel):
     "/run",
     summary="Run a Docker container",
     description="Run a Docker container with the specified configuration",
+    response_model=RunContainerResponse,
 )
 async def run_container(request: RunContainerRequest):
     try:
