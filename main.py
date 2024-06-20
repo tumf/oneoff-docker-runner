@@ -6,6 +6,7 @@ import os
 import base64
 import tempfile
 import shutil
+import time
 
 app = FastAPI()
 
@@ -100,6 +101,9 @@ class RunContainerResponse(BaseModel):
         example={"/mnt/data": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA=="},
         description="Contents of the volumes",
     )
+    execution_time: float = Field(
+        ..., example=1.234, description="Execution time in seconds"
+    )
 
 
 @app.post(
@@ -109,6 +113,8 @@ class RunContainerResponse(BaseModel):
     response_model=RunContainerResponse,
 )
 async def run_container(request: RunContainerRequest):
+    start_time = time.time()
+
     try:
         # Pull the image with authentication if provided
         auth_config = None
@@ -186,18 +192,21 @@ async def run_container(request: RunContainerRequest):
             for temp_dir in temp_dirs:
                 shutil.rmtree(temp_dir)
 
+        end_time = time.time()
+        execution_time = end_time - start_time
+
         return {
             "status": "success",
             "stdout": stdout_output,
             "stderr": stderr_output,
             "volumes": response_volume_contents,
+            "execution_time": execution_time,
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
