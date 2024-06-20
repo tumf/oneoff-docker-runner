@@ -151,39 +151,40 @@ async def run_container(request: RunContainerRequest):
             # Collect response volume information
             if "ro" not in bind_options:
                 response_volumes[container_path] = source_path
+        try:
+            # Run the container
+            container = client.containers.run(
+                request.image,
+                command=request.command,
+                entrypoint=request.entrypoint,
+                environment=request.env_vars,
+                volumes=volume_binds,
+                detach=True,
+                remove=False,
+            )
+            container.wait()
+            stdout_logs = container.logs(stdout=True, stderr=False)
+            stderr_logs = container.logs(stdout=False, stderr=True)
+            stdout_output = stdout_logs.decode('utf-8')
+            stderr_output = stderr_logs.decode('utf-8')
 
-        # Run the container
-        container = client.containers.run(
-            request.image,
-            command=request.command,
-            entrypoint=request.entrypoint,
-            environment=request.env_vars,
-            volumes=volume_binds,
-            detach=True,
-            remove=False,
-        )
-        container.wait()
-        stdout_logs = container.logs(stdout=True, stderr=False)
-        stderr_logs = container.logs(stdout=False, stderr=True)
-        stdout_output = stdout_logs.decode('utf-8')
-        stderr_output = stderr_logs.decode('utf-8')
+            # Collect response volumes content
+            response_volume_contents = {}
+            for container_path, source_path in response_volumes.items():
+                archive_name = tempfile.mktemp(suffix=".tar.gz")
+                shutil.make_archive(archive_name[:-7], "gztar", source_path)
+                with open(archive_name, "rb") as f:
+                    response_volume_contents[container_path] = base64.b64encode(
+                        f.read()
+                    ).decode("utf-8")
+        finally:
+            # Cleanup container
+            if container:
+                container.remove()
 
-        # Collect response volumes content
-        response_volume_contents = {}
-        for container_path, source_path in response_volumes.items():
-            archive_name = tempfile.mktemp(suffix=".tar.gz")
-            shutil.make_archive(archive_name[:-7], "gztar", source_path)
-            with open(archive_name, "rb") as f:
-                response_volume_contents[container_path] = base64.b64encode(
-                    f.read()
-                ).decode("utf-8")
-
-        # Cleanup container
-        container.remove()
-
-        # Cleanup temp directories
-        for temp_dir in temp_dirs:
-            shutil.rmtree(temp_dir)
+            # Cleanup temp directories
+            for temp_dir in temp_dirs:
+                shutil.rmtree(temp_dir)
 
         return {
             "status": "success",
