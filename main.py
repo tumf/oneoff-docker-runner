@@ -160,19 +160,13 @@ async def run_container(request: RunContainerRequest):
             environment=request.env_vars,
             volumes=volume_binds,
             detach=True,
-            remove=True,
+            remove=False,
         )
-
-        # Collect logs
-        logs = container.logs(stdout=True, stderr=True, stream=True)
-        stdout_output = ""
-        stderr_output = ""
-        for log in logs:
-            log_str = log.decode("utf-8")
-            if log_str.startswith("STDERR:"):
-                stderr_output += log_str[7:]
-            else:
-                stdout_output += log_str
+        container.wait()
+        stdout_logs = container.logs(stdout=True, stderr=False)
+        stderr_logs = container.logs(stdout=False, stderr=True)
+        stdout_output = stdout_logs.decode('utf-8')
+        stderr_output = stderr_logs.decode('utf-8')
 
         # Collect response volumes content
         response_volume_contents = {}
@@ -183,6 +177,9 @@ async def run_container(request: RunContainerRequest):
                 response_volume_contents[container_path] = base64.b64encode(
                     f.read()
                 ).decode("utf-8")
+
+        # Cleanup container
+        container.remove()
 
         # Cleanup temp directories
         for temp_dir in temp_dirs:
