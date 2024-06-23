@@ -86,7 +86,7 @@ class RunContainerRequest(BaseModel):
     entrypoint: Optional[List[str]|str] = Field(
         None, example=["/bin/sh", "-c"], description="Entrypoint for the container"
     )
-    env_vars: Optional[Dict[str, str]] = Field(
+    env_vars: Optional[Dict[str, str|int|bool]] = Field(
         None,
         example={"MY_VAR": "value"},
         description="Environment variables for the container",
