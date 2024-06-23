@@ -30,82 +30,97 @@ else:
 
 class AuthConfig(BaseModel):
     username: str = Field(
-        ..., example="your-username", description="Docker registry username"
+        ..., 
+        description="Docker registry username",
+        json_schema_extra={"example": "your-username"}
     )
     password: str = Field(
-        ..., example="your-password", description="Docker registry password"
+        ..., 
+        description="Docker registry password",
+        json_schema_extra={"example": "your-password"}
     )
     email: Optional[str] = Field(
-        None, example="your-email@example.com", description="Docker registry email"
+        None, 
+        description="Docker registry email",
+        json_schema_extra={"example": "your-email@example.com"}
     )
     serveraddress: str = Field(
         "https://index.docker.io/v1/",
-        example="https://index.docker.io/v1/",
         description="Docker registry server address",
+        json_schema_extra={"example": "https://index.docker.io/v1/"}
     )
 
 
 class VolumeConfig(BaseModel):
     content: str | None = Field(
         None,
-        example="base64encodedcontent",
         description="Base64 encoded content for the volume",
+        json_schema_extra={"example": "base64encodedcontent"}
     )
     response: Optional[bool] = Field(
         False,
-        example=True,
         description="Whether to return the volume",
+        json_schema_extra={"example": True}
     )
     type: Literal["file", "directory"] = Field(
         ...,
-        example="file",
         description="Type of the volume",
+        json_schema_extra={"example": "file"}
     )
 
 
 class VolumeResponse(BaseModel):
     content: str | None = Field(
         None,
-        example="base64encodedcontent",
         description="Base64 encoded content for the volume",
+        json_schema_extra={"example": "base64encodedcontent"}
     )
     type: Literal["file", "directory"] = Field(
         ...,
-        example="file",
         description="Type of the volume",
+        json_schema_extra={"example": "file"}
     )
 
 
 class RunContainerRequest(BaseModel):
-    image: str = Field(..., example="alpine:latest", description="Docker image to run")
+    image: str = Field(
+        ..., 
+        description="Docker image to run",
+        json_schema_extra={"example": "alpine:latest"}
+    )
     command: Optional[List[str]|str] = Field(
         None,
-        example=["echo", "Hello, World!"],
         description="Command to run in the container",
+        json_schema_extra={"example": ["echo", "Hello, World!"]}
     )
     entrypoint: Optional[List[str]|str] = Field(
-        None, example=["/bin/sh", "-c"], description="Entrypoint for the container"
+        None,
+        description="Entrypoint for the container",
+        json_schema_extra={"example": ["/bin/sh", "-c"]}
     )
     env_vars: Optional[Dict[str, str|int|bool]] = Field(
         None,
-        example={"MY_VAR": "value"},
         description="Environment variables for the container",
+        json_schema_extra={"example": {"MY_VAR": "value"}}
     )
     auth_config: Optional[AuthConfig] = Field(
-        None, description="Authentication configuration for pulling the image"
+        None,
+        description="Authentication configuration for pulling the image"
     )
     volumes: Optional[Dict[str, VolumeConfig]] = Field(
         None,
-        example={
-            "/app/hoge.txt:ro": {
-                "type": "file",
-                "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
-            },
-            "/app/data": {
-                "type": "directory",
-                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
-                "response": True,
-            },
+        json_schema_extra={
+            "example": {
+                "/app/hoge.txt:ro": {
+                    "type": "file",
+                    "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
+                },
+                "/app/data": {
+                    "type": "directory",
+                    "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
+                    "response": True,
+                },
+            }
         },
         description="Volumes to mount in the container",
     )
@@ -113,34 +128,43 @@ class RunContainerRequest(BaseModel):
 
 class RunContainerResponse(BaseModel):
     status: str = Field(
-        ..., example="success", description="Status of the container run"
+        ...,
+        json_schema_extra={"example": "success"},
+        description="Status of the container run"
     )
     stdout: str = Field(
-        ..., example="Hello, World!\n", description="Standard output from the container"
+        ...,
+        json_schema_extra={"example": "Hello, World!\n"},
+        description="Standard output from the container"
     )
     stderr: str = Field(
-        ..., example="", description="Standard error output from the container"
+        ...,
+        json_schema_extra={"example": ""},
+        description="Standard error output from the container"
     )
     volumes: Optional[Dict[str, VolumeResponse]] = Field(
         None,
-        example={
-            "/mnt/data": {
-                "type": "directory",
-                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
-                "response": True,
-            },
-            "/mnt/data/hoge.txt": {
-                "type": "file",
-                "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA==",
-            },
+        json_schema_extra={
+            "example": {
+                "/mnt/data": {
+                    "type": "directory",
+                    "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
+                    "response": True,
+                },
+                "/mnt/data/hoge.txt": {
+                    "type": "file",
+                    "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA==",
+                },
+            }
         },
         description="Contents of the volumes",
     )
     execution_time: float = Field(
-        ..., example=1.234, description="Execution time in seconds"
+        ...,
+        json_schema_extra={"example": 1.234},
+        description="Execution time in seconds"
     )
-
-
+    
 @app.post(
     "/run",
     summary="Run a Docker container",
