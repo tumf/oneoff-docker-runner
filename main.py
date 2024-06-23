@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Literal
 import docker
 import os
 import base64
@@ -47,39 +47,65 @@ class AuthConfig(BaseModel):
 
 
 class VolumeConfig(BaseModel):
-    content: str = Field(
-        ...,
+    content: str|None = Field(
+        None,
         example="base64encodedcontent",
         description="Base64 encoded content for the volume",
+    )
+    response: Optional[bool] = Field(
+        False,
+        example=True,
+        description="Whether to return the volume",
+    )
+    type: Literal["file", "directory"] = Field(
+        ...,
+        example="file",
+        description="Type of the volume",
+    )
+
+
+class VolumeResponse(BaseModel):
+    content: str | None = Field(
+        None,
+        example="base64encodedcontent",
+        description="Base64 encoded content for the volume",
+    )
+    type: Literal["file", "directory"] = Field(
+        ...,
+        example="file",
+        description="Type of the volume",
     )
 
 
 class RunContainerRequest(BaseModel):
     image: str = Field(..., example="alpine:latest", description="Docker image to run")
-    command: Optional[List[str]] = Field(
+    command: Optional[List[str]|str] = Field(
         None,
         example=["echo", "Hello, World!"],
         description="Command to run in the container",
     )
-    entrypoint: Optional[str] = Field(
-        None, example="/bin/sh", description="Entrypoint for the container"
+    entrypoint: Optional[List[str]|str] = Field(
+        None, example=["/bin/sh", "-c"], description="Entrypoint for the container"
     )
-    env_vars: Dict[str, str] = Field(
-        {},
+    env_vars: Optional[Dict[str, str]] = Field(
+        None,
         example={"MY_VAR": "value"},
         description="Environment variables for the container",
     )
     auth_config: Optional[AuthConfig] = Field(
         None, description="Authentication configuration for pulling the image"
     )
-    volumes: Dict[str, VolumeConfig] = Field(
-        {},
+    volumes: Optional[Dict[str, VolumeConfig]] = Field(
+        None,
         example={
             "vol-1:/mnt/hoge.txt:ro": {
+                "type": "file",
                 "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
             },
             "vol-2:/mnt/data": {
-                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA=="
+                "type": "directory",
+                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
+                "response": True,
             },
         },
         description="Volumes to mount in the container",
@@ -96,9 +122,19 @@ class RunContainerResponse(BaseModel):
     stderr: str = Field(
         ..., example="", description="Standard error output from the container"
     )
-    volumes: Dict[str, str] = Field(
-        ...,
-        example={"/mnt/data": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA=="},
+    volumes: Optional[Dict[str, VolumeResponse]] = Field(
+        None,
+        example={
+            "/mnt/data": {
+                "type": "directory",
+                "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
+                "response": True,
+            },
+            "/mnt/data/hoge.txt": {
+                "type": "file",
+                "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA==",
+            },
+        },
         description="Contents of the volumes",
     )
     execution_time: float = Field(
@@ -131,10 +167,12 @@ async def run_container(request: RunContainerRequest):
         volume_binds = {}
         response_volumes = {}
         temp_dirs = []
+        print("0........")
 
-        for host_path, vol_info in request.volumes.items():
-            container_path, *bind_options = host_path.split(":")
-            bind_options = bind_options or ["rw"]
+        for volumes_key, vol_info in request.volumes.items():
+            volumes_key_parts = volumes_key.split(":")
+            container_path = volumes_key_parts[0]
+            bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
             vol_content = vol_info.content
 
             temp_dir = tempfile.mkdtemp()
@@ -142,22 +180,32 @@ async def run_container(request: RunContainerRequest):
 
             # Decode the base64 content and write it to a temporary file or directory
             decoded_content = base64.b64decode(vol_content)
-            archive_path = os.path.join(temp_dir, "archive.tar.gz")
-            with open(archive_path, "wb") as f:
-                f.write(decoded_content)
-            shutil.unpack_archive(archive_path, temp_dir)
-
-            source_path = temp_dir
-            if os.path.isfile(os.path.join(temp_dir, os.path.basename(container_path))):
+            if vol_info.type == "file":
                 source_path = os.path.join(temp_dir, os.path.basename(container_path))
+                with open(source_path, "wb") as f:
+                    f.write(decoded_content)
+            elif vol_info.type == "directory":
+                archive_path = os.path.join(temp_dir, "archive.tar.gz")
+                with open(archive_path, "wb") as f:
+                    f.write(decoded_content)
+                shutil.unpack_archive(archive_path, temp_dir)
+                source_path = temp_dir
 
-            # Prepare volume bind options
-            volume_binds[source_path] = ":".join([container_path] + bind_options)
-
-            # Collect response volume information
-            if "ro" not in bind_options:
+            if vol_info.response:
                 response_volumes[container_path] = source_path
+            print(source_path)
+            # Read and print the content of source_path
+            if os.path.isfile(source_path):
+                with open(source_path, "r") as file:
+                    content = file.read()
+                    print(content)
+            # Prepare volume bind options
+            # volume_binds[source_path] = ":".join([container_path] + bind_options)
+            volume_binds[source_path] = { "bind": container_path, "mode": bind_option }
+            print(volume_binds)
+        container = None
         try:
+            print("1........")
             # Run the container
             container = client.containers.run(
                 request.image,
@@ -167,8 +215,10 @@ async def run_container(request: RunContainerRequest):
                 volumes=volume_binds,
                 detach=True,
                 remove=False,
-            )
-            container.wait()
+            ) 
+            print("2........")
+            result = container.wait()
+            print("3........")
             stdout_logs = container.logs(stdout=True, stderr=False)
             stderr_logs = container.logs(stdout=False, stderr=True)
             stdout_output = stdout_logs.decode('utf-8')
@@ -177,26 +227,50 @@ async def run_container(request: RunContainerRequest):
             # Collect response volumes content
             response_volume_contents = {}
             for container_path, source_path in response_volumes.items():
-                archive_name = tempfile.mktemp(suffix=".tar.gz")
-                shutil.make_archive(archive_name[:-7], "gztar", source_path)
-                with open(archive_name, "rb") as f:
-                    response_volume_contents[container_path] = base64.b64encode(
-                        f.read()
-                    ).decode("utf-8")
+                # if not exists, continue
+                if not os.path.exists(source_path):
+                    print(f"{container_path} not exists")
+                    response_volume_contents[container_path] = None
+                    continue
+                vol_info = request.volumes[container_path]
+
+                if vol_info.type == "file":
+                    with open(source_path, "rb") as f:
+                        response_volume_contents[container_path] = {
+                            "type": "file",
+                            "content": base64.b64encode(
+                                f.read()
+                            ).decode("utf-8")
+                        }
+                elif vol_info.type == "directory":
+                    archive_name = tempfile.mktemp(suffix=".tar.gz")
+                    shutil.make_archive(archive_name[:-7], "gztar", source_path)
+                    with open(archive_name, "rb") as f:
+                        response_volume_contents[container_path] = {
+                            "type": "directory",
+                            "content": base64.b64encode(
+                                f.read()
+                            ).decode("utf-8")
+                        }
+                        os.remove(archive_name)
+            print(response_volume_contents)
         finally:
             # Cleanup container
             if container:
                 container.remove()
 
             # Cleanup temp directories
-            for temp_dir in temp_dirs:
-                shutil.rmtree(temp_dir)
+            # for temp_dir in temp_dirs:
+            #     shutil.rmtree(temp_dir)
 
         end_time = time.time()
         execution_time = end_time - start_time
-
+        if result['StatusCode'] == 0:
+            status = "success"
+        else:
+            status = f"error: {result['StatusCode']}"
         return {
-            "status": "success",
+            "status": status,
             "stdout": stdout_output,
             "stderr": stderr_output,
             "volumes": response_volume_contents,
@@ -209,4 +283,4 @@ async def run_container(request: RunContainerRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="debug")
