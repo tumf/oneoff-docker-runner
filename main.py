@@ -97,11 +97,11 @@ class RunContainerRequest(BaseModel):
     volumes: Optional[Dict[str, VolumeConfig]] = Field(
         None,
         example={
-            "vol-1:/mnt/hoge.txt:ro": {
+            "/app/hoge.txt:ro": {
                 "type": "file",
                 "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
             },
-            "vol-2:/mnt/data": {
+            "/app/data": {
                 "type": "directory",
                 "content": "H4sIAAAAAAAAE2NgYGBgBGIGgA2BgYFV8EAAXxGH7gAAAA==",
                 "response": True,
