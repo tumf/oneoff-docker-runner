@@ -21,7 +21,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 ## Run on localhost 8222 port
 
 ```bash
-docker run -rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
+docker run --rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
 ```
 
 ## Installation
