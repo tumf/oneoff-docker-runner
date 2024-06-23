@@ -188,8 +188,8 @@ async def run_container(request: RunContainerRequest):
                 container.remove()
 
             # Cleanup temp directories
-            for temp_dir in temp_dirs:
-                shutil.rmtree(temp_dir)
+            # for temp_dir in temp_dirs:
+            #     shutil.rmtree(temp_dir)
 
         end_time = time.time()
         execution_time = end_time - start_time
