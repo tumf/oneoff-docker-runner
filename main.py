@@ -46,7 +46,7 @@ class AuthConfig(BaseModel):
 
 
 class VolumeConfig(BaseModel):
-    content: str|None = Field(
+    content: str | None = Field(
         None,
         example="base64encodedcontent",
         description="Base64 encoded content for the volume",
