@@ -225,12 +225,14 @@ def prepare_volumes(volumes):
             source_path = os.path.join(temp_dir, os.path.basename(container_path))
             with open(source_path, "wb") as f:
                 f.write(decoded_content)
+            print(f"wrote file: {source_path}")
         elif vol_info.type == "directory":
             archive_path = os.path.join(temp_dir, "archive.tar.gz")
             with open(archive_path, "wb") as f:
                 f.write(decoded_content)
             shutil.unpack_archive(archive_path, temp_dir)
             source_path = temp_dir
+            print(f"wrote directory: {source_path}")
 
         if vol_info.response:
             response_volumes[container_path] = source_path
