@@ -194,14 +194,16 @@ async def run_container(request: RunContainerRequest):
         end_time = time.time()
         execution_time = end_time - start_time
         status = "success" if result['StatusCode'] == 0 else f"error: {result['StatusCode']}"
-        return {
+        result = {
             "status": status,
             "stdout": stdout_output,
             "stderr": stderr_output,
             "volumes": response_volume_contents,
             "execution_time": execution_time,
         }
-
+        if status != "success":
+            raise HTTPException(status_code=500, detail=result)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
