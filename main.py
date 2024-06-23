@@ -10,7 +10,6 @@ import time
 
 app = FastAPI()
 
-# 環境変数が設定されていない場合のデフォルト設定
 docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
 tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
 cert_path = os.getenv("DOCKER_CERT_PATH", None)
@@ -164,48 +163,10 @@ async def run_container(request: RunContainerRequest):
         client.images.pull(request.image, auth_config=auth_config)
 
         # Prepare volumes
-        volume_binds = {}
-        response_volumes = {}
-        temp_dirs = []
-        print("0........")
+        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes)
 
-        for volumes_key, vol_info in request.volumes.items():
-            volumes_key_parts = volumes_key.split(":")
-            container_path = volumes_key_parts[0]
-            bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
-            vol_content = vol_info.content
-
-            temp_dir = tempfile.mkdtemp()
-            temp_dirs.append(temp_dir)
-
-            # Decode the base64 content and write it to a temporary file or directory
-            decoded_content = base64.b64decode(vol_content)
-            if vol_info.type == "file":
-                source_path = os.path.join(temp_dir, os.path.basename(container_path))
-                with open(source_path, "wb") as f:
-                    f.write(decoded_content)
-            elif vol_info.type == "directory":
-                archive_path = os.path.join(temp_dir, "archive.tar.gz")
-                with open(archive_path, "wb") as f:
-                    f.write(decoded_content)
-                shutil.unpack_archive(archive_path, temp_dir)
-                source_path = temp_dir
-
-            if vol_info.response:
-                response_volumes[container_path] = source_path
-            print(source_path)
-            # Read and print the content of source_path
-            if os.path.isfile(source_path):
-                with open(source_path, "r") as file:
-                    content = file.read()
-                    print(content)
-            # Prepare volume bind options
-            # volume_binds[source_path] = ":".join([container_path] + bind_options)
-            volume_binds[source_path] = { "bind": container_path, "mode": bind_option }
-            print(volume_binds)
         container = None
         try:
-            print("1........")
             # Run the container
             container = client.containers.run(
                 request.image,
@@ -215,60 +176,24 @@ async def run_container(request: RunContainerRequest):
                 volumes=volume_binds,
                 detach=True,
                 remove=False,
-            ) 
-            print("2........")
+            )
             result = container.wait()
-            print("3........")
-            stdout_logs = container.logs(stdout=True, stderr=False)
-            stderr_logs = container.logs(stdout=False, stderr=True)
-            stdout_output = stdout_logs.decode('utf-8')
-            stderr_output = stderr_logs.decode('utf-8')
+            stdout_output, stderr_output = get_container_logs(container)
 
             # Collect response volumes content
-            response_volume_contents = {}
-            for container_path, source_path in response_volumes.items():
-                # if not exists, continue
-                if not os.path.exists(source_path):
-                    print(f"{container_path} not exists")
-                    response_volume_contents[container_path] = None
-                    continue
-                vol_info = request.volumes[container_path]
-
-                if vol_info.type == "file":
-                    with open(source_path, "rb") as f:
-                        response_volume_contents[container_path] = {
-                            "type": "file",
-                            "content": base64.b64encode(
-                                f.read()
-                            ).decode("utf-8")
-                        }
-                elif vol_info.type == "directory":
-                    archive_name = tempfile.mktemp(suffix=".tar.gz")
-                    shutil.make_archive(archive_name[:-7], "gztar", source_path)
-                    with open(archive_name, "rb") as f:
-                        response_volume_contents[container_path] = {
-                            "type": "directory",
-                            "content": base64.b64encode(
-                                f.read()
-                            ).decode("utf-8")
-                        }
-                        os.remove(archive_name)
-            print(response_volume_contents)
+            response_volume_contents = collect_response_volumes(response_volumes, request.volumes)
         finally:
             # Cleanup container
             if container:
                 container.remove()
 
             # Cleanup temp directories
-            # for temp_dir in temp_dirs:
-            #     shutil.rmtree(temp_dir)
+            for temp_dir in temp_dirs:
+                shutil.rmtree(temp_dir)
 
         end_time = time.time()
         execution_time = end_time - start_time
-        if result['StatusCode'] == 0:
-            status = "success"
-        else:
-            status = f"error: {result['StatusCode']}"
+        status = "success" if result['StatusCode'] == 0 else f"error: {result['StatusCode']}"
         return {
             "status": status,
             "stdout": stdout_output,
@@ -279,6 +204,72 @@ async def run_container(request: RunContainerRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def prepare_volumes(volumes):
+    volume_binds = {}
+    response_volumes = {}
+    temp_dirs = []
+
+    for volumes_key, vol_info in volumes.items():
+        volumes_key_parts = volumes_key.split(":")
+        container_path = volumes_key_parts[0]
+        bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
+        vol_content = vol_info.content
+
+        temp_dir = tempfile.mkdtemp()
+        temp_dirs.append(temp_dir)
+
+        # Decode the base64 content and write it to a temporary file or directory
+        decoded_content = base64.b64decode(vol_content)
+        if vol_info.type == "file":
+            source_path = os.path.join(temp_dir, os.path.basename(container_path))
+            with open(source_path, "wb") as f:
+                f.write(decoded_content)
+        elif vol_info.type == "directory":
+            archive_path = os.path.join(temp_dir, "archive.tar.gz")
+            with open(archive_path, "wb") as f:
+                f.write(decoded_content)
+            shutil.unpack_archive(archive_path, temp_dir)
+            source_path = temp_dir
+
+        if vol_info.response:
+            response_volumes[container_path] = source_path
+
+        volume_binds[source_path] = {"bind": container_path, "mode": bind_option}
+
+    return volume_binds, response_volumes, temp_dirs
+
+def get_container_logs(container):
+    stdout_logs = container.logs(stdout=True, stderr=False)
+    stderr_logs = container.logs(stdout=False, stderr=True)
+    stdout_output = stdout_logs.decode('utf-8')
+    stderr_output = stderr_logs.decode('utf-8')
+    return stdout_output, stderr_output
+
+def collect_response_volumes(response_volumes, volumes):
+    response_volume_contents = {}
+    for container_path, source_path in response_volumes.items():
+        if not os.path.exists(source_path):
+            response_volume_contents[container_path] = None
+            continue
+        vol_info = volumes[container_path]
+
+        if vol_info.type == "file":
+            with open(source_path, "rb") as f:
+                response_volume_contents[container_path] = {
+                    "type": "file",
+                    "content": base64.b64encode(f.read()).decode("utf-8")
+                }
+        elif vol_info.type == "directory":
+            archive_name = tempfile.mktemp(suffix=".tar.gz")
+            shutil.make_archive(archive_name[:-7], "gztar", source_path)
+            with open(archive_name, "rb") as f:
+                response_volume_contents[container_path] = {
+                    "type": "directory",
+                    "content": base64.b64encode(f.read()).decode("utf-8")
+                }
+                os.remove(archive_name)
+    return response_volume_contents
 
 if __name__ == "__main__":
     import uvicorn
