@@ -164,7 +164,7 @@ async def run_container(request: RunContainerRequest):
 
         # Prepare volumes
         volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes)
-
+        print(f"volume_binds: {volume_binds}")
         container = None
         try:
             # Run the container
