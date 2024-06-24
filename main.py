@@ -30,24 +30,24 @@ else:
 
 class AuthConfig(BaseModel):
     username: str = Field(
-        ..., 
+        ...,
         description="Docker registry username",
-        json_schema_extra={"example": "your-username"}
+        json_schema_extra={"example": "your-username"},
     )
     password: str = Field(
-        ..., 
+        ...,
         description="Docker registry password",
-        json_schema_extra={"example": "your-password"}
+        json_schema_extra={"example": "your-password"},
     )
     email: Optional[str] = Field(
-        None, 
+        None,
         description="Docker registry email",
-        json_schema_extra={"example": "your-email@example.com"}
+        json_schema_extra={"example": "your-email@example.com"},
     )
     serveraddress: str = Field(
         "https://index.docker.io/v1/",
         description="Docker registry server address",
-        json_schema_extra={"example": "https://index.docker.io/v1/"}
+        json_schema_extra={"example": "https://index.docker.io/v1/"},
     )
 
 
@@ -55,17 +55,15 @@ class VolumeConfig(BaseModel):
     content: Optional[str] = Field(
         None,
         description="Base64 encoded content for the volume",
-        json_schema_extra={"example": "base64encodedcontent"}
+        json_schema_extra={"example": "base64encodedcontent"},
     )
     response: Optional[bool] = Field(
         False,
         description="Whether to return the volume",
-        json_schema_extra={"example": True}
+        json_schema_extra={"example": True},
     )
     type: Literal["file", "directory"] = Field(
-        ...,
-        description="Type of the volume",
-        json_schema_extra={"example": "file"}
+        ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
 
 
@@ -73,39 +71,36 @@ class VolumeResponse(BaseModel):
     content: Optional[str] = Field(
         None,
         description="Base64 encoded content for the volume",
-        json_schema_extra={"example": "base64encodedcontent"}
+        json_schema_extra={"example": "base64encodedcontent"},
     )
     type: Literal["file", "directory"] = Field(
-        ...,
-        description="Type of the volume",
-        json_schema_extra={"example": "file"}
+        ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
 
 
 class RunContainerRequest(BaseModel):
     image: str = Field(
-        ..., 
+        ...,
         description="Docker image to run",
-        json_schema_extra={"example": "alpine:latest"}
+        json_schema_extra={"example": "alpine:latest"},
     )
     command: Optional[Union[List[str], str]] = Field(
         None,
         description="Command to run in the container",
-        json_schema_extra={"example": ["echo", "Hello, World!"]}
+        json_schema_extra={"example": ["echo", "Hello, World!"]},
     )
     entrypoint: Optional[Union[List[str], str]] = Field(
         None,
         description="Entrypoint for the container",
-        json_schema_extra={"example": ["/bin/sh", "-c"]}
+        json_schema_extra={"example": ["/bin/sh", "-c"]},
     )
     env_vars: Optional[Dict[str, Union[str, int, bool]]] = Field(
         None,
         description="Environment variables for the container",
-        json_schema_extra={"example": {"MY_VAR": "value"}}
+        json_schema_extra={"example": {"MY_VAR": "value"}},
     )
     auth_config: Optional[AuthConfig] = Field(
-        None,
-        description="Authentication configuration for pulling the image"
+        None, description="Authentication configuration for pulling the image"
     )
     volumes: Optional[Dict[str, VolumeConfig]] = Field(
         None,
@@ -113,7 +108,7 @@ class RunContainerRequest(BaseModel):
             "example": {
                 "/app/hoge.txt:ro": {
                     "type": "file",
-                    "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA=="
+                    "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA==",
                 },
                 "/app/data": {
                     "type": "directory",
@@ -130,17 +125,17 @@ class RunContainerResponse(BaseModel):
     status: str = Field(
         ...,
         json_schema_extra={"example": "success"},
-        description="Status of the container run"
+        description="Status of the container run",
     )
     stdout: str = Field(
         ...,
         json_schema_extra={"example": "Hello, World!\n"},
-        description="Standard output from the container"
+        description="Standard output from the container",
     )
     stderr: str = Field(
         ...,
         json_schema_extra={"example": ""},
-        description="Standard error output from the container"
+        description="Standard error output from the container",
     )
     volumes: Optional[Dict[str, VolumeResponse]] = Field(
         None,
@@ -162,9 +157,10 @@ class RunContainerResponse(BaseModel):
     execution_time: float = Field(
         ...,
         json_schema_extra={"example": 1.234},
-        description="Execution time in seconds"
+        description="Execution time in seconds",
     )
-    
+
+
 @app.post(
     "/run",
     summary="Run a Docker container",
@@ -205,7 +201,9 @@ async def run_container(request: RunContainerRequest):
             stdout_output, stderr_output = get_container_logs(container)
 
             # Collect response volumes content
-            response_volume_contents = collect_response_volumes(response_volumes, request.volumes)
+            response_volume_contents = collect_response_volumes(
+                response_volumes, request.volumes
+            )
         finally:
             # Cleanup container
             if container:
@@ -213,11 +211,13 @@ async def run_container(request: RunContainerRequest):
 
             # Cleanup temp directories
             for temp_dir in temp_dirs:
-                 shutil.rmtree(temp_dir)
+                shutil.rmtree(temp_dir)
 
         end_time = time.time()
         execution_time = end_time - start_time
-        status = "success" if result['StatusCode'] == 0 else f"error: {result['StatusCode']}"
+        status = (
+            "success" if result["StatusCode"] == 0 else f"error: {result['StatusCode']}"
+        )
         result = {
             "status": status,
             "stdout": stdout_output,
@@ -230,6 +230,7 @@ async def run_container(request: RunContainerRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def prepare_volumes(volumes):
     volume_binds = {}
@@ -267,12 +268,14 @@ def prepare_volumes(volumes):
 
     return volume_binds, response_volumes, temp_dirs
 
+
 def get_container_logs(container):
     stdout_logs = container.logs(stdout=True, stderr=False)
     stderr_logs = container.logs(stdout=False, stderr=True)
-    stdout_output = stdout_logs.decode('utf-8')
-    stderr_output = stderr_logs.decode('utf-8')
+    stdout_output = stdout_logs.decode("utf-8")
+    stderr_output = stderr_logs.decode("utf-8")
     return stdout_output, stderr_output
+
 
 def collect_response_volumes(response_volumes, volumes):
     response_volume_contents = {}
@@ -286,7 +289,7 @@ def collect_response_volumes(response_volumes, volumes):
             with open(source_path, "rb") as f:
                 response_volume_contents[container_path] = {
                     "type": "file",
-                    "content": base64.b64encode(f.read()).decode("utf-8")
+                    "content": base64.b64encode(f.read()).decode("utf-8"),
                 }
         elif vol_info.type == "directory":
             archive_name = tempfile.mktemp(suffix=".tar.gz")
@@ -294,10 +297,11 @@ def collect_response_volumes(response_volumes, volumes):
             with open(archive_name, "rb") as f:
                 response_volume_contents[container_path] = {
                     "type": "directory",
-                    "content": base64.b64encode(f.read()).decode("utf-8")
+                    "content": base64.b64encode(f.read()).decode("utf-8"),
                 }
                 os.remove(archive_name)
     return response_volume_contents
+
 
 if __name__ == "__main__":
     import uvicorn
