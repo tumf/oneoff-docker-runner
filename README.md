@@ -28,7 +28,7 @@ Run One-off docker command like as:
 
 ```bash
 curl -X 'POST' \
-  'http://0.0.0.0:8000/run' \
+  'http://0.0.0.0:8222/run' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
