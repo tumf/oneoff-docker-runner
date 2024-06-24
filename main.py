@@ -52,7 +52,7 @@ class AuthConfig(BaseModel):
 
 
 class VolumeConfig(BaseModel):
-    content: str | None = Field(
+    content: Optional[str] = Field(
         None,
         description="Base64 encoded content for the volume",
         json_schema_extra={"example": "base64encodedcontent"}
@@ -70,7 +70,7 @@ class VolumeConfig(BaseModel):
 
 
 class VolumeResponse(BaseModel):
-    content: str | None = Field(
+    content: Optional[str] = Field(
         None,
         description="Base64 encoded content for the volume",
         json_schema_extra={"example": "base64encodedcontent"}
