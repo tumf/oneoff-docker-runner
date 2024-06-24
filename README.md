@@ -4,19 +4,19 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 
 ## Features
 
-- Run Docker containers with one-off commands
-- Pull images from private Docker registries with authentication
-- Set environment variables for container execution
-- Customize command and entrypoint for container execution
-- Capture and return both stdout and stderr output
+* Run Docker containers with one-off commands
+* Pull images from private Docker registries with authentication
+* Set environment variables for container execution
+* Customize command and entrypoint for container execution
+* Capture and return both stdout and stderr output
 
 ## Requirements
 
-- Python 3.9 or higher
-- Docker
-- FastAPI
-- Uvicorn
-- Docker-py
+* Python 3.9 or higher
+* Docker
+* FastAPI
+* Uvicorn
+* Docker-py
 
 ## Run on localhost 8222 port
 
@@ -24,31 +24,62 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 docker run --rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
 ```
 
+Run One-off docker command like as:
+
+```bash
+curl -X 'POST' \
+  'http://0.0.0.0:8000/run' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "image": "alpine:latest",
+  "command": [
+     "/test.sh"
+  ],
+  "volumes": {
+    "/app/data": {
+      "content": "H4sIAGq4eGYAA0tJLEnUZ6AtMDAwMDc1VQDTZhDawMgEQkOBgqGJmbGZobGJobGBgoGhkaGBGYOCKY3dBQalxSWJRUCnlJTmpuFTB1SWhk8B1B9wehSMglEwCgY5AADBaWLyAAYAAA==",
+      "response": true,
+      "type": "directory"
+    },
+    "/test.sh:ro": {
+      "mode" : "0755",
+      "content": "IyEvYmluL2FzaAoKZWNobyAiSGVsbG8sIFdvcmxkISIgPiAvYXBwL2RhdGEvdGVzdC50eHQ=",
+      "type": "file"
+    }
+  }
+}'
+```
+
 ## Installation
 
 1. Clone the repository:
+    
 
-    ```bash
+```bash
     git clone https://github.com/tumf/oneoff-docker-runner.git
     cd oneoff-docker-runner
     ```
 
 2. Create and activate a virtual environment:
+    
 
-    ```bash
+```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     ```
 
 3. Install the dependencies:
+    
 
-    ```bash
+```bash
     pip install -r requirements.txt
     ```
 
 4. Create a `.env` file in the project root (if needed) to set environment variables for Docker:
+    
 
-    ```env
+```env
     DOCKER_HOST=tcp://your-docker-host:2376
     DOCKER_TLS_VERIFY=1
     DOCKER_CERT_PATH=/path/to/certs
@@ -57,14 +88,16 @@ docker run --rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.i
 ## Usage
 
 1. Start the FastAPI server:
+    
 
-    ```bash
+```bash
     uvicorn main:app --host 0.0.0.0 --port 8000
     ```
 
 2. Send a POST request to the `/run` endpoint with the following JSON body to run a Docker container:
+    
 
-    ```json
+```json
     {
         "image": "alpine:latest",
         "command": ["echo", "Hello, World!"],
@@ -81,8 +114,9 @@ docker run --rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.i
     ```
 
 3. The API will return a JSON response with the stdout and stderr output from the container:
+    
 
-    ```json
+```json
     {
         "status": "success",
         "stdout": "Hello, World!\n",
@@ -178,7 +212,7 @@ On Windows, you can use PowerShell:
 ```
 
 4. **Use the base64 encoded string for authentication:**
-   - Use the base64 encoded string as the `password` in the `auth_config`.
+   - Use the base64 encoded string as the `password` in the `auth_config` .
 
 Here is an example of what the service account JSON key file might look like before encoding:
 
@@ -214,7 +248,6 @@ Use the base64 encoded string as shown below:
 ```
 
 In this example, replace `your-base64-encoded-service-account-json-key-content` and other placeholder values with the actual base64 encoded string and other values from your downloaded service account JSON file.
-
 
 ### GitHub Container Registry (GHCR)
 
