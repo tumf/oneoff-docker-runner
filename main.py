@@ -65,6 +65,9 @@ class VolumeConfig(BaseModel):
     type: Literal["file", "directory"] = Field(
         ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
+    mode: Optional[str] = Field(
+        None, description="File mode of the file", json_schema_extra={"example": "0644"}
+    )
 
 
 class VolumeResponse(BaseModel):
@@ -147,6 +150,7 @@ class RunContainerResponse(BaseModel):
                     "response": True,
                 },
                 "/mnt/data/hoge.txt": {
+                    "mode": "0644",
                     "type": "file",
                     "content": "VGhpcyBpcyB0aGUgY29udGVudCBvZiBob2dlLnR4dA==",
                 },
@@ -252,7 +256,9 @@ def prepare_volumes(volumes):
             source_path = os.path.join(temp_dir, os.path.basename(container_path))
             with open(source_path, "wb") as f:
                 f.write(decoded_content)
-            print(f"wrote file: {source_path}")
+            if vol_info.mode:
+                os.chmod(source_path, int(vol_info.mode, 8))
+            print(f"wrote file: {source_path} with mode {vol_info.mode}")
         elif vol_info.type == "directory":
             archive_path = os.path.join(temp_dir, "archive.tar.gz")
             with open(archive_path, "wb") as f:
