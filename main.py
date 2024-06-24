@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Union
 import docker
 import os
 import base64
@@ -88,17 +88,17 @@ class RunContainerRequest(BaseModel):
         description="Docker image to run",
         json_schema_extra={"example": "alpine:latest"}
     )
-    command: Optional[List[str]|str] = Field(
+    command: Optional[Union[List[str], str]] = Field(
         None,
         description="Command to run in the container",
         json_schema_extra={"example": ["echo", "Hello, World!"]}
     )
-    entrypoint: Optional[List[str]|str] = Field(
+    entrypoint: Optional[Union[List[str], str]] = Field(
         None,
         description="Entrypoint for the container",
         json_schema_extra={"example": ["/bin/sh", "-c"]}
     )
-    env_vars: Optional[Dict[str, str|int|bool]] = Field(
+    env_vars: Optional[Dict[str, Union[str, int, bool]]] = Field(
         None,
         description="Environment variables for the container",
         json_schema_extra={"example": {"MY_VAR": "value"}}
