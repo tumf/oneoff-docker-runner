@@ -54,7 +54,7 @@ class AuthConfig(BaseModel):
 class VolumeConfig(BaseModel):
     content: Optional[str] = Field(
         None,
-        description="Base64 encoded content for the volume",
+        description="Base64 encoded content for the volume, when type = file|directory",
         json_schema_extra={"example": "base64encodedcontent"},
     )
     response: Optional[bool] = Field(
@@ -62,11 +62,16 @@ class VolumeConfig(BaseModel):
         description="Whether to return the volume",
         json_schema_extra={"example": True},
     )
-    type: Literal["file", "directory"] = Field(
+    type: Literal["file", "directory", "volume"] = Field(
         ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
     mode: Optional[str] = Field(
         None, description="File mode of the file", json_schema_extra={"example": "0644"}
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Name of the volume (only use when type=volume)",
+        json_schema_extra={"example": "my-volume"},
     )
 
 
@@ -76,7 +81,7 @@ class VolumeResponse(BaseModel):
         description="Base64 encoded content for the volume",
         json_schema_extra={"example": "base64encodedcontent"},
     )
-    type: Literal["file", "directory"] = Field(
+    type: Literal["file", "directory", "volume"] = Field(
         ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
 
@@ -185,7 +190,6 @@ async def run_container(request: RunContainerRequest):
                 "serveraddress": request.auth_config.serveraddress,
             }
         client.images.pull(request.image, auth_config=auth_config)
-
         # Prepare volumes
         volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes)
         print(f"volume_binds: {volume_binds}")
@@ -240,18 +244,21 @@ def prepare_volumes(volumes):
     volume_binds = {}
     response_volumes = {}
     temp_dirs = []
+    bind_option = None
 
     for volumes_key, vol_info in volumes.items():
         volumes_key_parts = volumes_key.split(":")
         container_path = volumes_key_parts[0]
-        bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
-        vol_content = vol_info.content
+        if vol_info.type in ["file", "directory"]:
+            bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
+            vol_content = vol_info.content
 
-        temp_dir = tempfile.mkdtemp()
-        temp_dirs.append(temp_dir)
+            temp_dir = tempfile.mkdtemp()
+            temp_dirs.append(temp_dir)
 
-        # Decode the base64 content and write it to a temporary file or directory
-        decoded_content = base64.b64decode(vol_content)
+            # Decode the base64 content and write it to a temporary file or directory
+            decoded_content = base64.b64decode(vol_content)
+
         if vol_info.type == "file":
             source_path = os.path.join(temp_dir, os.path.basename(container_path))
             with open(source_path, "wb") as f:
@@ -266,12 +273,18 @@ def prepare_volumes(volumes):
             shutil.unpack_archive(archive_path, temp_dir)
             source_path = temp_dir
             print(f"wrote directory: {source_path}")
+        elif vol_info.type == "volume":
+            source_path = vol_info.name
 
         if vol_info.response:
-            response_volumes[container_path] = source_path
+            if vol_info.type == "volume":
+                print(f"response type volume return: {source_path} is not supported")
+            else:
+                response_volumes[container_path] = source_path
 
-        volume_binds[source_path] = {"bind": container_path, "mode": bind_option}
-
+        volume_binds[source_path] = {"bind": container_path}
+        if bind_option:
+            volume_binds[source_path]["mode"] = bind_option
     return volume_binds, response_volumes, temp_dirs
 
 
@@ -307,6 +320,87 @@ def collect_response_volumes(response_volumes, volumes):
                 }
                 os.remove(archive_name)
     return response_volume_contents
+
+
+class CreateVolumeRequest(BaseModel):
+    name: str = Field(
+        ...,
+        description="Name of the volume",
+        json_schema_extra={"example": "my-volume"},
+    )
+    content: Optional[str] = Field(
+        None,
+        description="Base64 encoded data to put into the volume",
+        json_schema_extra={
+            "example": "H4sIAIQOfmYAA+2TMQ7DIAxFcxRO0Biw4TxIabYsjSPl+HUhStWFjdCqfgxeLPHh6U+J0zi0BQAikckzlAkOyzwwFoOPCBEoGLBOzmCoca7MtnJ6SBTelrm2J2tzbeF4xzl/hOnln+8r2xvv3OYO+Y+AWPNPb/8RxL+PVvxDmzif/Ln/rL53CKUbZ//dt/Tfl/6T9v8KsvreIRRFUZTLeQL28PKYAA4AAA=="
+        },
+    )
+    driver: Optional[str] = Field(
+        "local",
+        description="Driver of the volume",
+        json_schema_extra={"example": "local"},
+    )
+    driver_opts: Optional[Dict[str, str]] = Field(
+        None,
+        description="Driver options of the volume",
+        json_schema_extra={"example": {}},
+    )
+    labels: Optional[Dict[str, str]] = Field(
+        None,
+        description="Labels of the volume",
+        json_schema_extra={"example": {"key": "value"}},
+    )
+
+
+class CreateVolumeResponse(BaseModel):
+    status: str = Field(
+        ...,
+        json_schema_extra={"example": "success"},
+        description="Status of the volume creation",
+    )
+    detail: Optional[str] = Field(
+        None,
+        json_schema_extra={"example": "success"},
+        description="Detail of the volume creation",
+    )
+
+
+def write_content_to_volume(volume, encoded_content):
+    container = client.containers.run(
+        "busybox",
+        f"sh -c 'echo $ENCODED_CONTENT | base64 -d | tar -C /volume --strip-components=1 -xz'",
+        environment={"ENCODED_CONTENT": encoded_content},
+        volumes={
+            volume.name: {"bind": "/volume", "mode": "rw"},
+        },
+        detach=True,
+        remove=True,
+    )
+    container.wait()
+
+
+@app.post(
+    "/volume",
+    summary="Create volume on Docker",
+    description="Create volume on Docker",
+    response_model=CreateVolumeResponse,
+)
+async def create_volume(request: CreateVolumeRequest):
+    # volume = client.volumes.get(request.name)
+    # if not volume:
+    volume = client.volumes.create(
+        request.name,
+        driver=request.driver,
+        driver_opts=request.driver_opts,
+        labels=request.labels,
+    )
+    if request.content:
+        write_content_to_volume(volume, request.content)
+
+    return {
+        "status": "success",
+        "detail": f"Volume {request.name} created",
+    }
 
 
 if __name__ == "__main__":
