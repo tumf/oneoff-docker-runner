@@ -9,6 +9,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Set environment variables for container execution
 * Customize command and entrypoint for container execution
 * Capture and return both stdout and stderr output
+* Create Docker volume with base64 tar.gz image
 
 ## Requirements
 
@@ -124,27 +125,25 @@ curl -X 'POST' \
     }
     ```
 
-### Request Example
+### POST /run
+
+Execute one-off docker container
+
+#### Request Example
 
 Use the following `curl` command to make a POST request to the `/run` endpoint. Replace the placeholders with your actual image details and authentication information.
 
-```bash
-curl -X POST "http://localhost:8000/run" -H "Content-Type: application/json" -d '{
+```json
+{
   "image": "your-registry/your-image:tag",
   "command": ["echo", "Hello, World!"],
   "env_vars": {
     "MY_VAR": "value"
-  },
-  "auth_config": {
-    "username": "your-username",
-    "password": "your-password",
-    "email": "your-email@example.com",
-    "serveraddress": "https://your-registry"
   }
-}'
+}
 ```
 
-### Response Example
+#### Response Example
 
 The API will return a JSON response with the `stdout` and `stderr` output from the container:
 
@@ -157,6 +156,34 @@ The API will return a JSON response with the `stdout` and `stderr` output from t
 ```
 
 This example demonstrates how to use the API to run a one-off Docker container with specified image, command, environment variables, and authentication information. The response will include the standard output and standard error from the executed command within the container.
+
+### POST /volume
+
+Create Docker volume
+
+```bash
+$ tar czf tmp.tar.gz target_dir
+$ base64 < tmp.tar.gz
+```
+#### Request Example
+
+Create `my-volume` Docker volume with content.
+
+```json
+{
+  "name": "my-volume",
+  "content": "H4sIAIQOfmYAA+2TMQ7DIAxFcxRO0Biw4TxIabYsjSPl+HUhStWFjdCqfgxeLPHh6U+J0zi0BQAikckzlAkOyzwwFoOPCBEoGLBOzmCoca7MtnJ6SBTelrm2J2tzbeF4xzl/hOnln+8r2xvv3OYO+Y+AWPNPb/8RxL+PVvxDmzif/Ln/rL53CKUbZ//dt/Tfl/6T9v8KsvreIRRFUZTLeQL28PKYAA4AAA=="
+}
+```
+
+#### Response Example
+
+```json
+{
+  "status": "success",
+  "detail": "success"
+}
+```
 
 ## Docker Registry Authentication
 
