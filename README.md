@@ -60,7 +60,7 @@ curl -X 'POST' \
 ```bash
     git clone https://github.com/tumf/oneoff-docker-runner.git
     cd oneoff-docker-runner
-    ```
+```
 
 2. Create and activate a virtual environment:
     
@@ -68,14 +68,14 @@ curl -X 'POST' \
 ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
+```
 
 3. Install the dependencies:
     
 
 ```bash
     pip install -r requirements.txt
-    ```
+```
 
 4. Create a `.env` file in the project root (if needed) to set environment variables for Docker:
     
@@ -84,7 +84,7 @@ curl -X 'POST' \
     DOCKER_HOST=tcp://your-docker-host:2376
     DOCKER_TLS_VERIFY=1
     DOCKER_CERT_PATH=/path/to/certs
-    ```
+```
 
 ## Usage
 
@@ -93,7 +93,7 @@ curl -X 'POST' \
 
 ```bash
     uvicorn main:app --host 0.0.0.0 --port 8000
-    ```
+```
 
 2. Send a POST request to the `/run` endpoint with the following JSON body to run a Docker container:
     
@@ -112,7 +112,7 @@ curl -X 'POST' \
             "serveraddress": "https://index.docker.io/v1/"
         }
     }
-    ```
+```
 
 3. The API will return a JSON response with the stdout and stderr output from the container:
     
@@ -123,7 +123,7 @@ curl -X 'POST' \
         "stdout": "Hello, World!\n",
         "stderr": ""
     }
-    ```
+```
 
 ### POST /run
 
