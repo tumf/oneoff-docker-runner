@@ -403,6 +403,15 @@ async def create_volume(request: CreateVolumeRequest):
     }
 
 
+@app.get("/health")
+def health():
+    docker_info = client.info()
+    if not docker_info:
+        raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
+
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     import uvicorn
 
