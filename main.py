@@ -107,6 +107,11 @@ class RunContainerRequest(BaseModel):
         description="Environment variables for the container",
         json_schema_extra={"example": {"MY_VAR": "value"}},
     )
+    pull_policy: Optional[Literal["always", "never"]] = Field(
+        "always",
+        description="Pull policy for the image",
+        json_schema_extra={"example": "always"},
+    )
     auth_config: Optional[AuthConfig] = Field(
         None, description="Authentication configuration for pulling the image"
     )
@@ -189,7 +194,8 @@ async def run_container(request: RunContainerRequest):
                 "email": request.auth_config.email,
                 "serveraddress": request.auth_config.serveraddress,
             }
-        client.images.pull(request.image, auth_config=auth_config)
+        if request.pull_policy == "always":
+            client.images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
         volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes)
         print(f"volume_binds: {volume_binds}")
