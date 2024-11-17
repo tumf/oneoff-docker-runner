@@ -139,9 +139,16 @@ Use the following `curl` command to make a POST request to the `/run` endpoint. 
   "command": ["echo", "Hello, World!"],
   "env_vars": {
     "MY_VAR": "value"
-  }
+  },
+  "pull_policy": "always"
 }
 ```
+
+#### Request Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| pull_policy | string | No | "always" | Image pull policy. Possible values: "always" (always pull image), "never" (use local image only) |
 
 #### Response Example
 
