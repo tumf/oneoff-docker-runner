@@ -197,7 +197,7 @@ async def run_container(request: RunContainerRequest):
         if request.pull_policy == "always":
             client.images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
-        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes)
+        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes or {})
         print(f"volume_binds: {volume_binds}")
         container = None
         try:
@@ -250,7 +250,10 @@ def prepare_volumes(volumes):
     volume_binds = {}
     response_volumes = {}
     temp_dirs = []
-    bind_option = None
+    
+    # volumes が None の場合は早期リターン
+    if not volumes:
+        return volume_binds, response_volumes, temp_dirs
 
     for volumes_key, vol_info in volumes.items():
         volumes_key_parts = volumes_key.split(":")
