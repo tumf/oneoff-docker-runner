@@ -251,37 +251,34 @@ def prepare_volumes(volumes):
     response_volumes = {}
     temp_dirs = []
     
-    # volumes が None の場合は早期リターン
     if not volumes:
         return volume_binds, response_volumes, temp_dirs
 
     for volumes_key, vol_info in volumes.items():
         volumes_key_parts = volumes_key.split(":")
         container_path = volumes_key_parts[0]
-        if vol_info.type in ["file", "directory"]:
-            bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
-            vol_content = vol_info.content
+        bind_option = volumes_key_parts[1] if len(volumes_key_parts) > 1 else "rw"
 
+        if vol_info.type in ["file", "directory"]:
+            vol_content = vol_info.content
             temp_dir = tempfile.mkdtemp()
             temp_dirs.append(temp_dir)
-
-            # Decode the base64 content and write it to a temporary file or directory
             decoded_content = base64.b64decode(vol_content)
 
-        if vol_info.type == "file":
-            source_path = os.path.join(temp_dir, os.path.basename(container_path))
-            with open(source_path, "wb") as f:
-                f.write(decoded_content)
-            if vol_info.mode:
-                os.chmod(source_path, int(vol_info.mode, 8))
-            print(f"wrote file: {source_path} with mode {vol_info.mode}")
-        elif vol_info.type == "directory":
-            archive_path = os.path.join(temp_dir, "archive.tar.gz")
-            with open(archive_path, "wb") as f:
-                f.write(decoded_content)
-            shutil.unpack_archive(archive_path, temp_dir)
-            source_path = temp_dir
-            print(f"wrote directory: {source_path}")
+            if vol_info.type == "file":
+                source_path = os.path.join(temp_dir, os.path.basename(container_path))
+                with open(source_path, "wb") as f:
+                    f.write(decoded_content)
+                if vol_info.mode:
+                    os.chmod(source_path, int(vol_info.mode, 8))
+                print(f"wrote file: {source_path} with mode {vol_info.mode}")
+            elif vol_info.type == "directory":
+                archive_path = os.path.join(temp_dir, "archive.tar.gz")
+                with open(archive_path, "wb") as f:
+                    f.write(decoded_content)
+                shutil.unpack_archive(archive_path, temp_dir)
+                source_path = temp_dir
+                print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
             source_path = vol_info.name
 
@@ -291,9 +288,8 @@ def prepare_volumes(volumes):
             else:
                 response_volumes[container_path] = source_path
 
-        volume_binds[source_path] = {"bind": container_path}
-        if bind_option:
-            volume_binds[source_path]["mode"] = bind_option
+        volume_binds[source_path] = {"bind": container_path, "mode": bind_option}
+
     return volume_binds, response_volumes, temp_dirs
 
 
