@@ -1,6 +1,8 @@
 import sys
 import urllib.request
+
 import click
+
 
 @click.command()
 @click.option("--url", help="URL to check", required=True)

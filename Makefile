@@ -49,11 +49,14 @@ format:
 
 # Type checking and linting
 lint:
-	uv run mypy .
+	@echo "Installing missing type stubs..."
+	@uv add --dev types-docker types-requests || true
+	uv run mypy . --install-types --non-interactive
 
 # Run tests
 test:
-	uv run pytest
+	@echo "Running tests with coverage..."
+	uv run pytest -v --tb=short
 
 # Clean up temporary files
 clean:

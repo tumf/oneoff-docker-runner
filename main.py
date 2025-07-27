@@ -1,12 +1,13 @@
+import base64
+import os
+import shutil
+import tempfile
+import time
+from typing import Any, Dict, List, Literal, Optional, Union
+
+import docker
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Literal, Union, Any
-import docker
-import os
-import base64
-import tempfile
-import shutil
-import time
 
 # Integrated FastAPI app with MCP support
 app = FastAPI(title="Docker Runner with MCP Integration")
@@ -17,6 +18,7 @@ tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
 cert_path = os.getenv("DOCKER_CERT_PATH", None)
 
 client = None
+
 
 def get_docker_client():
     """Get Docker client with lazy initialization and error handling"""
@@ -39,8 +41,7 @@ def get_docker_client():
             client.ping()
         except Exception as e:
             raise HTTPException(
-                status_code=503, 
-                detail=f"Docker daemon is unavailable: {str(e)}"
+                status_code=503, detail=f"Docker daemon is unavailable: {str(e)}"
             )
     return client
 
@@ -214,7 +215,9 @@ async def run_container(request: RunContainerRequest):
         if request.pull_policy == "always":
             get_docker_client().images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
-        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes or {})
+        volume_binds, response_volumes, temp_dirs = prepare_volumes(
+            request.volumes or {}
+        )
         print(f"volume_binds: {volume_binds}")
         container = None
         try:
@@ -267,7 +270,7 @@ def prepare_volumes(volumes):
     volume_binds = {}
     response_volumes = {}
     temp_dirs = []
-    
+
     if not volumes:
         return volume_binds, response_volumes, temp_dirs
 
@@ -431,11 +434,16 @@ def health():
         docker_info = get_docker_client().info()
         if not docker_info:
             raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
-        return {"status": "ok", "docker_version": docker_info.get("ServerVersion", "unknown")}
+        return {
+            "status": "ok",
+            "docker_version": docker_info.get("ServerVersion", "unknown"),
+        }
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Docker daemon is unavailable: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Docker daemon is unavailable: {str(e)}"
+        )
 
 
 # MCP Tool Models
@@ -443,9 +451,11 @@ class ToolRequest(BaseModel):
     name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
+
 class ToolResponse(BaseModel):
     content: List[Dict[str, str]]
     isError: Optional[bool] = False
+
 
 # MCP Endpoints
 @app.get("/mcp")
@@ -453,8 +463,9 @@ async def mcp_root():
     return {
         "name": "Docker Runner MCP Server",
         "version": "1.0.0",
-        "tools": ["run_container", "create_volume", "docker_health"]
+        "tools": ["run_container", "create_volume", "docker_health"],
     }
+
 
 @app.get("/mcp/tools")
 async def list_mcp_tools():
@@ -467,35 +478,48 @@ async def list_mcp_tools():
                     "type": "object",
                     "properties": {
                         "image": {"type": "string", "description": "Docker image name"},
-                        "command": {"type": "array", "items": {"type": "string"}, "description": "Command to run"},
-                        "env_vars": {"type": "object", "description": "Environment variables"},
-                        "pull_policy": {"type": "string", "enum": ["always", "never"], "default": "always"}
+                        "command": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Command to run",
+                        },
+                        "env_vars": {
+                            "type": "object",
+                            "description": "Environment variables",
+                        },
+                        "pull_policy": {
+                            "type": "string",
+                            "enum": ["always", "never"],
+                            "default": "always",
+                        },
                     },
-                    "required": ["image"]
-                }
+                    "required": ["image"],
+                },
             },
             {
-                "name": "create_volume", 
+                "name": "create_volume",
                 "description": "Create a Docker volume",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "description": "Volume name"},
-                        "driver": {"type": "string", "default": "local", "description": "Volume driver"}
+                        "driver": {
+                            "type": "string",
+                            "default": "local",
+                            "description": "Volume driver",
+                        },
                     },
-                    "required": ["name"]
-                }
+                    "required": ["name"],
+                },
             },
             {
                 "name": "docker_health",
                 "description": "Check Docker daemon health",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
+                "inputSchema": {"type": "object", "properties": {}},
+            },
         ]
     }
+
 
 @app.post("/mcp/tools/call")
 async def call_mcp_tool(request: ToolRequest):
@@ -507,12 +531,14 @@ async def call_mcp_tool(request: ToolRequest):
         elif request.name == "docker_health":
             return await mcp_docker_health_tool(request.arguments)
         else:
-            raise HTTPException(status_code=404, detail=f"Tool '{request.name}' not found")
+            raise HTTPException(
+                status_code=404, detail=f"Tool '{request.name}' not found"
+            )
     except Exception as e:
         return ToolResponse(
-            content=[{"type": "text", "text": f"Error: {str(e)}"}],
-            isError=True
+            content=[{"type": "text", "text": f"Error: {str(e)}"}], isError=True
         )
+
 
 async def mcp_run_container_tool(args: Dict[str, Any]) -> ToolResponse:
     """Run a Docker container via MCP"""
@@ -520,12 +546,12 @@ async def mcp_run_container_tool(args: Dict[str, Any]) -> ToolResponse:
     command = args.get("command", [])
     env_vars = args.get("env_vars", {})
     pull_policy = args.get("pull_policy", "always")
-    
+
     try:
         # Pull image if requested
         if pull_policy == "always":
             get_docker_client().images.pull(image)
-        
+
         # Run container
         container = get_docker_client().containers.run(
             image,
@@ -534,19 +560,25 @@ async def mcp_run_container_tool(args: Dict[str, Any]) -> ToolResponse:
             remove=True,
             detach=False,
         )
-        
-        output = container.decode('utf-8').strip()
+
+        output = container.decode("utf-8").strip()
         return ToolResponse(
-            content=[{"type": "text", "text": f"Container executed successfully. Output: {output}"}]
+            content=[
+                {
+                    "type": "text",
+                    "text": f"Container executed successfully. Output: {output}",
+                }
+            ]
         )
     except Exception as e:
         raise Exception(f"Failed to run container: {str(e)}")
+
 
 async def mcp_create_volume_tool(args: Dict[str, Any]) -> ToolResponse:
     """Create a Docker volume via MCP"""
     name = args.get("name")
     driver = args.get("driver", "local")
-    
+
     try:
         volume = get_docker_client().volumes.create(name, driver=driver)
         return ToolResponse(
@@ -554,6 +586,7 @@ async def mcp_create_volume_tool(args: Dict[str, Any]) -> ToolResponse:
         )
     except Exception as e:
         raise Exception(f"Failed to create volume: {str(e)}")
+
 
 async def mcp_docker_health_tool(args: Dict[str, Any]) -> ToolResponse:
     """Check Docker health via MCP"""
@@ -569,7 +602,7 @@ async def mcp_docker_health_tool(args: Dict[str, Any]) -> ToolResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Run with both REST API and MCP on the same port
     print("🚀 Starting integrated server with both REST API and MCP on port 8000")
     print("  - REST API: http://localhost:8000/run")
