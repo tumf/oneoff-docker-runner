@@ -537,75 +537,6 @@ async def sse_heartbeat():
     )
 
 
-# Legacy MCP HTTP endpoints for compatibility
-@app.get("/mcp/info")
-async def mcp_info():
-    """MCP server information"""
-    return {
-        "name": "Docker Runner MCP Server",
-        "version": "1.0.0",
-        "protocol": "mcp",
-        "transport": "sse",
-        "tools": ["run_container", "create_volume", "docker_health"],
-    }
-
-
-@app.get("/mcp/tools")
-async def list_mcp_tools():
-    """List available MCP tools"""
-    return {
-        "tools": [
-            {
-                "name": "run_container",
-                "description": "Run a Docker container",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "image": {"type": "string", "description": "Docker image name"},
-                        "command": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Command to run",
-                        },
-                        "env_vars": {
-                            "type": "object",
-                            "description": "Environment variables",
-                        },
-                        "pull_policy": {
-                            "type": "string",
-                            "enum": ["always", "never"],
-                            "default": "always",
-                        },
-                    },
-                    "required": ["image"],
-                },
-            },
-            {
-                "name": "create_volume",
-                "description": "Create a Docker volume",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Volume name"},
-                        "driver": {
-                            "type": "string",
-                            "default": "local",
-                            "description": "Volume driver",
-                        },
-                    },
-                    "required": ["name"],
-                },
-            },
-            {
-                "name": "docker_health",
-                "description": "Check Docker daemon health",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        ]
-    }
 
 
 # Manual MCP Protocol Implementation
@@ -740,7 +671,6 @@ if __name__ == "__main__":
     print("🚀 Starting integrated server with both REST API and MCP on port 8001")
     print("  - REST API: http://localhost:8001/run")
     print("  - MCP JSON-RPC: http://localhost:8001/mcp")
-    print("  - MCP Info: http://localhost:8001/mcp/info")
     print("  - SSE Heartbeat: http://localhost:8001/sse-heartbeat")
     print("  - Health: http://localhost:8001/health")
     print("  - Docs: http://localhost:8001/docs")
