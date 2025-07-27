@@ -4,7 +4,7 @@ import base64
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app
+from mcp import create_mcp_app
 
 
 class TestMCPServer:
@@ -12,6 +12,7 @@ class TestMCPServer:
 
     def setup_method(self):
         """Set up test client"""
+        app = create_mcp_app()
         self.client = TestClient(app)
 
     def test_mcp_initialize(self):
@@ -22,12 +23,15 @@ class TestMCPServer:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["jsonrpc"] == "2.0"
-        assert data["id"] == 1
-        assert "result" in data
-        assert data["result"]["protocolVersion"] == "2024-11-05"
-        assert "capabilities" in data["result"]
-        assert "serverInfo" in data["result"]
+        assert isinstance(data, list)
+        assert len(data) == 1
+        result = data[0]
+        assert result["jsonrpc"] == "2.0"
+        assert result["id"] == 1
+        assert "result" in result
+        assert result["result"]["protocolVersion"] == "2024-11-05"
+        assert "capabilities" in result["result"]
+        assert "serverInfo" in result["result"]
 
     def test_mcp_tools_list(self):
         """Test MCP JSON-RPC tools/list method"""
@@ -37,11 +41,14 @@ class TestMCPServer:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["jsonrpc"] == "2.0"
-        assert data["id"] == 2
-        assert "result" in data
-        assert "tools" in data["result"]
-        tools = data["result"]["tools"]
+        assert isinstance(data, list)
+        assert len(data) == 1
+        result = data[0]
+        assert result["jsonrpc"] == "2.0"
+        assert result["id"] == 2
+        assert "result" in result
+        assert "tools" in result["result"]
+        tools = result["result"]["tools"]
         assert len(tools) > 0
         tool_names = [tool["name"] for tool in tools]
         assert "run_container" in tool_names
@@ -61,10 +68,13 @@ class TestMCPServer:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["jsonrpc"] == "2.0"
-        assert data["id"] == 3
-        assert "result" in data
-        assert "content" in data["result"]
+        assert isinstance(data, list)
+        assert len(data) == 1
+        result = data[0]
+        assert result["jsonrpc"] == "2.0"
+        assert result["id"] == 3
+        assert "result" in result
+        assert "content" in result["result"]
 
     def test_mcp_invalid_method(self):
         """Test MCP JSON-RPC with invalid method"""
@@ -74,11 +84,14 @@ class TestMCPServer:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["jsonrpc"] == "2.0"
-        assert data["id"] == 4
-        assert "error" in data
-        assert data["error"]["code"] == -32601
-        assert "Method not found" in data["error"]["message"]
+        assert isinstance(data, list)
+        assert len(data) == 1
+        result = data[0]
+        assert result["jsonrpc"] == "2.0"
+        assert result["id"] == 4
+        assert "error" in result
+        assert result["error"]["code"] == -32601
+        assert "Method not found" in result["error"]["message"]
 
 
 if __name__ == "__main__":

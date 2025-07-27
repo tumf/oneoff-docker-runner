@@ -1,12 +1,13 @@
+import base64
+import os
+import shutil
+import tempfile
+import time
+from typing import Any, Dict, List, Literal, Optional, Union
+
+import docker
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Literal, Union
-import docker
-import os
-import base64
-import tempfile
-import shutil
-import time
 
 app = FastAPI()
 
@@ -197,7 +198,9 @@ async def run_container(request: RunContainerRequest):
         if request.pull_policy == "always":
             client.images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
-        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes or {})
+        volume_binds, response_volumes, temp_dirs = prepare_volumes(
+            request.volumes or {}
+        )
         print(f"volume_binds: {volume_binds}")
         container = None
         try:
@@ -207,7 +210,7 @@ async def run_container(request: RunContainerRequest):
                 command=request.command,
                 entrypoint=request.entrypoint,
                 environment=request.env_vars,
-                volumes=volume_binds,
+                volumes=volume_binds or None,  # type: ignore
                 detach=True,
                 remove=False,
             )
@@ -246,11 +249,11 @@ async def run_container(request: RunContainerRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def prepare_volumes(volumes):
-    volume_binds = {}
-    response_volumes = {}
-    temp_dirs = []
-    
+def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
+    volume_binds: Dict[str, Dict[str, str]] = {}
+    response_volumes: Dict[str, str] = {}
+    temp_dirs: List[str] = []
+
     if not volumes:
         return volume_binds, response_volumes, temp_dirs
 
@@ -261,6 +264,8 @@ def prepare_volumes(volumes):
 
         if vol_info.type in ["file", "directory"]:
             vol_content = vol_info.content
+            if vol_content is None:
+                continue
             temp_dir = tempfile.mkdtemp()
             temp_dirs.append(temp_dir)
             decoded_content = base64.b64decode(vol_content)
@@ -280,7 +285,7 @@ def prepare_volumes(volumes):
                 source_path = temp_dir
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
-            source_path = vol_info.name
+            source_path = vol_info.name or ""
 
         if vol_info.response:
             if vol_info.type == "volume":
@@ -301,8 +306,13 @@ def get_container_logs(container):
     return stdout_output, stderr_output
 
 
-def collect_response_volumes(response_volumes, volumes):
-    response_volume_contents = {}
+def collect_response_volumes(
+    response_volumes: Dict[str, str], volumes: Optional[Dict[str, VolumeConfig]]
+):
+    response_volume_contents: Dict[str, Optional[Dict[str, str]]] = {}
+    if not volumes:
+        return response_volume_contents
+
     for container_path, source_path in response_volumes.items():
         if not os.path.exists(source_path):
             response_volume_contents[container_path] = None

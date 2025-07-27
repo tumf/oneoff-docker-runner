@@ -1,5 +1,22 @@
 ---
 alwaysApply: true
 ---
+
+## Endpoints
+
 - main.py listen 8000 port as default. `/run` `/volume` `/health`
 - mcp.py listen 80001 port as default `/mcp` => [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)
+
+## MCP (Model Context Protocol)
+
+* Streamable HTTP
+* `tools/call`
+* `tools/list`
+
+## Docker Container
+
+- /Dockerfile launch both `main.py` and `mcp.py`
+
+## code
+
+- run `make format lint test`
