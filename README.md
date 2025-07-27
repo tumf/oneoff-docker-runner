@@ -10,7 +10,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Customize command and entrypoint for container execution
 * Capture and return both stdout and stderr output
 * Create Docker volume with base64 tar.gz image
-* **Integrated MCP (Model Context Protocol) server with standard SSE transport on the same port**
+* **Separate MCP (Model Context Protocol) server with Streamable HTTP transport**
 
 ## Requirements
 
@@ -19,17 +19,17 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * `uv` (recommended) or `pip` for package management
 * Dependencies managed via `pyproject.toml`
 
-## Run on localhost 8223 port
+## Run on localhost ports
 
 ```bash
-docker run --rm -p 8223:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
+docker run --rm -p 8000:8000 -p 8001:8001 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
 ```
 
 Run One-off docker command like as:
 
 ```bash
 curl -X 'POST' \
-  'http://0.0.0.0:8223/run' \
+  'http://0.0.0.0:8000/run' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -109,19 +109,28 @@ DOCKER_CERT_PATH=/path/to/certs
 
 ## Usage
 
-### Integrated Server (REST API + MCP on Same Port)
+### Dual Server Architecture
 
-1. Start the integrated server:
+1. Start both servers:
 
 ```bash
-python main.py
+# Option 1: Start both servers manually
+python main.py &    # REST API on port 8000
+python mcp.py &     # MCP Server on port 8001
+
+# Option 2: Use the start script (recommended)
+./start.sh
+
+# Option 3: Use Docker (includes both servers)
+docker run -d --name oneoff-docker-runner \
+  -p 8000:8000 -p 8001:8001 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  oneoff-docker-runner
 ```
 
-This starts both the REST API and MCP server on port 8000:
-- REST API endpoints: `http://localhost:8000/run`,        `/volume`,        `/health`
-- MCP SSE endpoint: `http://localhost:8000/sse` (standard transport)
-- MCP Messages endpoint: `http://localhost:8000/messages` (standard transport)
-- API Documentation: `http://localhost:8000/docs`
+This starts:
+- **REST API** (main.py): `http://localhost:8000` - `/run`,  `/volume`,  `/health`,  `/docs`
+- **MCP Server** (mcp.py): `http://localhost:8001` - `/mcp` (Streamable HTTP)
 
 ### REST API Usage
 
@@ -155,22 +164,27 @@ This starts both the REST API and MCP server on port 8000:
 
 ### MCP Server (Model Context Protocol)
 
-Execute Docker containers directly from AI clients (Claude Desktop, Cursor, n8n, etc.) using standard MCP SSE transport.
+Execute Docker containers directly from AI clients (Claude Desktop, Cursor, n8n, etc.) using MCP Streamable HTTP transport.
 
 #### 1. Start Server
 
 ```bash
-python main.py
+# Both servers
+./start.sh
+
+# Or just MCP server
+python mcp.py
 ```
 
-The server provides standard MCP SSE transport at:
-- SSE endpoint: `http://localhost:8000/sse`
-- Messages endpoint: `http://localhost:8000/messages`
+The MCP server provides Streamable HTTP transport at:
+- **MCP Endpoint**: `http://localhost:8001/mcp`
+- **Protocol**: MCP Streamable HTTP (2024-11-05)
+- **Content Types**: JSON and Server-Sent Events (SSE)
 
 #### 2. AI Client Configuration
 
 **n8n MCP Client Tool:**
-- SSE Endpoint: `http://localhost:8000/sse`
+- MCP Endpoint: `http://localhost:8001/mcp`
 - Authentication: None
 - Tools to Include: All
 
@@ -182,7 +196,7 @@ Add to `claude_desktop_config.json` :
   "mcpServers": {
     "docker-runner": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-stdio", "http://localhost:8000/sse"]
+      "args": ["-y", "@modelcontextprotocol/server-stdio", "http://localhost:8001/mcp"]
     }
   }
 }
@@ -191,16 +205,18 @@ Add to `claude_desktop_config.json` :
 **Cursor:**
 Add to Cursor settings under "MCP Servers":
 - Name: `docker-runner`
-- URL: `http://localhost:8000/sse`
+- URL: `http://localhost:8001/mcp`
 
 **Other MCP-compatible clients:**
-Configure MCP server SSE URL as `http://localhost:8000/sse` .
+Configure MCP server URL as `http://localhost:8001/mcp` .
 
 #### 3. Available Functions
 
 - **run_container**: Execute Docker containers
 - **create_volume**: Create Docker volumes  
 - **docker_health**: Check Docker environment status
+- **list_containers**: List Docker containers
+- **list_images**: List Docker images
 
 ### POST /run
 
@@ -382,25 +398,26 @@ For GitHub Container Registry, you need to use your GitHub username and a Person
 
 ## Quick Start
 
-### 1. Start the Server
+### 1. Start Both Servers
 
 ```bash
-# Start the integrated server (both REST API and MCP on port 8000)
-uv run python main.py
+# Start both REST API and MCP servers
+./start.sh
 
-# Or with pip (if using pip instead of uv)
-python main.py
+# Or with uv
+uv run ./start.sh
+
+# Or manually
+uv run python main.py &    # REST API on port 8000
+uv run python mcp.py &     # MCP Server on port 8001
 ```
 
 Output:
 
 ```
-🚀 Starting integrated server with both REST API and standard MCP on port 8000
-  - REST API: http://localhost:8000/run
-  - MCP SSE (standard): http://localhost:8000/sse
-  - MCP Messages (standard): http://localhost:8000/messages
-  - Health: http://localhost:8000/health
-  - Docs: http://localhost:8000/docs
+Starting Docker Runner servers...
+- REST API (main.py) on port 8000
+- MCP Server (mcp.py) on port 8001
 ```
 
 ### 2. Test REST API
@@ -429,39 +446,40 @@ curl -X POST http://localhost:8000/run \
   }'
 ```
 
-### 3. Test MCP SSE (Standard Transport)
+### 3. Test MCP Streamable HTTP
 
-Test the standard MCP SSE implementation:
+Test the MCP Streamable HTTP implementation:
 
 ```bash
-# Test SSE connection (should show message endpoint)
-curl -N "http://localhost:8000/sse?sessionId=test123"
-
-# In another terminal, send initialize message
-curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+# Initialize MCP connection
+curl -X POST "http://localhost:8001/mcp" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
     "method": "initialize",
     "params": {
       "protocolVersion": "2024-11-05",
-      "capabilities": {}
+      "capabilities": {"tools": {}},
+      "clientInfo": {"name": "test-client", "version": "1.0.0"}
     }
   }'
 
 # List available tools
-curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+curl -X POST "http://localhost:8001/mcp" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": 2,
     "method": "tools/list"
   }'
 
-# Run a container
-curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+# Run a container via MCP
+curl -X POST "http://localhost:8001/mcp" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": 3,
@@ -470,35 +488,59 @@ curl -X POST "http://localhost:8000/messages?sessionId=test123" \
       "name": "run_container",
       "arguments": {
         "image": "alpine:latest",
-        "command": ["echo", "Hello from MCP SSE!"]
+        "command": ["echo", "Hello from MCP!"]
       }
+    }
+  }'
+
+# Test SSE (Server-Sent Events) response
+curl -X POST "http://localhost:8001/mcp" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "tools/call",
+    "params": {
+      "name": "docker_health",
+      "arguments": {}
     }
   }'
 ```
 
 ### 4. Integration with AI Clients
 
-The server is now compatible with standard MCP clients:
+The MCP server is compatible with standard MCP clients:
 
 **n8n Integration:**
 1. Add MCP Client Tool node to your workflow
-2. Configure SSE Endpoint: `http://localhost:8000/sse`
+2. Configure MCP Endpoint: `http://localhost:8001/mcp`
 3. Set Authentication to None
 4. Select Tools to Include: All
-5. Use the available tools (run_container, create_volume, docker_health) in your workflows
+5. Use the available tools (run_container, create_volume, docker_health, list_containers, list_images) in your workflows
 
 **Claude Desktop/Cursor:**
-Configure the MCP server in your client settings using the SSE endpoint `http://localhost:8000/sse` to enable AI-powered Docker container management.
+Configure the MCP server in your client settings using the endpoint `http://localhost:8001/mcp` to enable AI-powered Docker container management.
 
 ## Architecture
 
-The integrated server provides:
+The dual-server architecture provides:
 
-- **Single Port (8000)**: Both REST API and MCP on the same port
-- **FastAPI Integration**: Automatic OpenAPI documentation at `/docs`
-- **Standard MCP Implementation**: SSE (Server-Sent Events) transport protocol
-- **MCP Endpoints**: `/sse` for SSE connections and `/messages` for JSON-RPC 2.0 messages
-- **Session Management**: Proper session handling for MCP connections
-- **Unified Logging**: All requests logged through the same system
+- **REST API Server** (port 8000): Traditional HTTP REST API for direct integration
+  - FastAPI with automatic OpenAPI documentation at `/docs`
+  - Endpoints: `/run`,  `/volume`,  `/health`
+  - Direct Docker container execution
+  
+- **MCP Server** (port 8001): Model Context Protocol for AI agent integration
+  - **MCP Streamable HTTP** (2024-11-05 specification)
+  - Single endpoint: `/mcp` for all MCP communication
+  - **Dual Response Types**: JSON and SSE based on `Accept` header
+  - **Session Management**: `Mcp-Session-Id` header support
+  - **Tools**: run_container, create_volume, docker_health, list_containers, list_images
 
-This design eliminates the need to manage multiple servers while providing full compatibility with both traditional HTTP clients and standard MCP-aware AI systems like n8n, Claude Desktop, and Cursor.
+- **Unified Management**: Both servers managed via `start.sh` script
+  - Concurrent execution with proper signal handling
+  - Graceful shutdown for both processes
+  - Docker integration with shared socket mounting
+
+This design provides maximum flexibility, allowing direct REST API usage for traditional integrations while offering full MCP compatibility for AI-powered workflows through dedicated, standards-compliant transport.
