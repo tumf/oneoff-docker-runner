@@ -118,7 +118,7 @@ python main.py
 ```
 
 This starts both the REST API and MCP server on port 8000:
-- REST API endpoints: `http://localhost:8000/run`,        `/volume`,        `/health`
+- REST API endpoints: `http://localhost:8000/run`,          `/volume`,          `/health`
 - MCP SSE endpoint: `http://localhost:8000/mcp`
 - API Documentation: `http://localhost:8000/docs`
 
@@ -152,72 +152,22 @@ This starts both the REST API and MCP server on port 8000:
 }
 ```
 
-### MCP Integration (Model Context Protocol)
+### MCP Server (Model Context Protocol)
 
-The integrated server automatically provides MCP functionality alongside the REST API.
+Execute Docker containers directly from AI clients (Claude Desktop, Cursor, etc.).
 
-#### Available MCP Tools
+#### 1. Start Server
 
-All REST API endpoints are automatically available as MCP tools:
-- `run`: Run Docker containers with full configuration support
-- `volume`: Create and manage Docker volumes  
-- `health`: Check Docker daemon health
-
-#### Using the MCP Server
-
-The MCP server can be used with any MCP-compatible client. Here's a complete example:
-
-```python
-from fastmcp import Client
-import asyncio
-import requests
-
-async def test_mcp_integration():
-    """Test both REST API and MCP functionality"""
-    
-    # First, verify server is running
-    try:
-        response = requests.get("http://localhost:8000/health", timeout=5)
-        print(f"✅ Server status: {response.json()}")
-    except:
-        print("❌ Server not running. Start with: uv run python main.py")
-        return
-    
-    # Connect to the integrated MCP server
-    async with Client("http://localhost:8000/mcp") as client:
-        print("✅ Connected to MCP server!")
-        
-        # List available tools
-        tools = await client.list_tools()
-        print(f"🛠️ Available tools: {[tool.name for tool in tools.tools]}")
-        
-        # Run a Docker container
-        result = await client.call_tool("run_container", {
-            "image": "alpine:latest",
-            "command": ["echo", "Hello from MCP!"],
-            "env_vars": {"TEST": "production"},
-            "pull_policy": "always"
-        })
-        print(f"🐳 Container output: {result.text}")
-        
-        # Create a volume
-        result = await client.call_tool("create_volume", {
-            "name": "test-volume-mcp",
-            "driver": "local"
-        })
-        print(f"🗃️ Volume creation: {result.text}")
-        
-        # Check Docker health
-        health = await client.call_tool("docker_health", {})
-        print(f"💊 Docker status: {health.text}")
-
-if __name__ == "__main__":
-    asyncio.run(test_mcp_integration())
+```bash
+python main.py
 ```
 
-#### MCP Configuration for AI Clients
+The server accepts MCP requests at `http://localhost:8000/mcp` .
 
-For AI clients like Claude Desktop, add this configuration to your MCP settings:
+#### 2. AI Client Configuration
+
+**Claude Desktop:**
+Add to `claude_desktop_config.json` :
 
 ```json
 {
@@ -229,13 +179,19 @@ For AI clients like Claude Desktop, add this configuration to your MCP settings:
 }
 ```
 
-#### Running Tests
+**Cursor:**
+Add to Cursor settings under "MCP Servers":
+- Name: `docker-runner`  
+- URL: `http://localhost:8000/mcp`
 
-Test the MCP functionality:
+**Other MCP-compatible clients:**
+Configure MCP server URL as `http://localhost:8000/mcp` .
 
-```bash
-python -m pytest tests/test_mcp_server.py -v
-```
+#### 3. Available Functions
+
+- **run_container**: Execute Docker containers
+- **create_volume**: Create Docker volumes  
+- **docker_health**: Check Docker environment status
 
 ### POST /run
 

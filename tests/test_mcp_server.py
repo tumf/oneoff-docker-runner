@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,34 +34,8 @@ class TestMCPServer:
         tool_names = [tool["name"] for tool in tools]
         assert "run_container" in tool_names
         assert "create_volume" in tool_names
-        assert "docker_health" in tool_names
 
-    def test_docker_health_check(self):
-        """Test Docker health check tool"""
-        response = self.client.post("/mcp/tools/call", json={
-            "name": "docker_health",
-            "arguments": {}
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert "content" in data
-        assert len(data["content"]) > 0
-        
-        # Check if the response has the expected structure
-        content = data["content"][0]
-        assert "text" in content
-        content_text = content["text"]
-        
-        # The response should contain health information
-        # It might be JSON or plain text, so handle both cases
-        try:
-            health_data = json.loads(content_text)
-            assert "status" in health_data
-        except json.JSONDecodeError:
-            # If not JSON, check for common health status indicators
-            assert content_text is not None
-            assert len(content_text) > 0
-            # Allow the test to pass if we get any response (Docker might not be available)
+
 
     @pytest.mark.skip(reason="Docker container tests disabled for CI")
     def test_run_docker_container_simple_disabled(self):

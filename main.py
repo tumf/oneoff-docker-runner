@@ -463,7 +463,7 @@ async def mcp_root():
     return {
         "name": "Docker Runner MCP Server",
         "version": "1.0.0",
-        "tools": ["run_container", "create_volume", "docker_health"],
+        "tools": ["run_container", "create_volume"],
     }
 
 
@@ -512,11 +512,6 @@ async def list_mcp_tools():
                     "required": ["name"],
                 },
             },
-            {
-                "name": "docker_health",
-                "description": "Check Docker daemon health",
-                "inputSchema": {"type": "object", "properties": {}},
-            },
         ]
     }
 
@@ -528,8 +523,6 @@ async def call_mcp_tool(request: ToolRequest):
             return await mcp_run_container_tool(request.arguments)
         elif request.name == "create_volume":
             return await mcp_create_volume_tool(request.arguments)
-        elif request.name == "docker_health":
-            return await mcp_docker_health_tool(request.arguments)
         else:
             raise HTTPException(
                 status_code=404, detail=f"Tool '{request.name}' not found"
@@ -588,16 +581,7 @@ async def mcp_create_volume_tool(args: Dict[str, Any]) -> ToolResponse:
         raise Exception(f"Failed to create volume: {str(e)}")
 
 
-async def mcp_docker_health_tool(args: Dict[str, Any]) -> ToolResponse:
-    """Check Docker health via MCP"""
-    try:
-        info = get_docker_client().info()
-        version = info.get("ServerVersion", "unknown")
-        return ToolResponse(
-            content=[{"type": "text", "text": f"Docker is healthy. Version: {version}"}]
-        )
-    except Exception as e:
-        raise Exception(f"Docker health check failed: {str(e)}")
+
 
 
 if __name__ == "__main__":
