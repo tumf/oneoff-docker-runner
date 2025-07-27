@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Literal, Union
+from typing import List, Dict, Optional, Literal, Union, Any
 import docker
 import os
 import base64
@@ -8,24 +8,41 @@ import tempfile
 import shutil
 import time
 
-app = FastAPI()
+# Integrated FastAPI app with MCP support
+app = FastAPI(title="Docker Runner with MCP Integration")
 
+# Docker client setup (lazy initialization)
 docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
 tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
 cert_path = os.getenv("DOCKER_CERT_PATH", None)
 
-if tls_verify == "1" and cert_path:
-    tls_config = docker.tls.TLSConfig(
-        client_cert=(
-            os.path.join(cert_path, "cert.pem"),
-            os.path.join(cert_path, "key.pem"),
-        ),
-        ca_cert=os.path.join(cert_path, "ca.pem"),
-        verify=True,
-    )
-    client = docker.DockerClient(base_url=docker_host, tls=tls_config)
-else:
-    client = docker.DockerClient(base_url=docker_host)
+client = None
+
+def get_docker_client():
+    """Get Docker client with lazy initialization and error handling"""
+    global client
+    if client is None:
+        try:
+            if tls_verify == "1" and cert_path:
+                tls_config = docker.tls.TLSConfig(
+                    client_cert=(
+                        os.path.join(cert_path, "cert.pem"),
+                        os.path.join(cert_path, "key.pem"),
+                    ),
+                    ca_cert=os.path.join(cert_path, "ca.pem"),
+                    verify=True,
+                )
+                client = docker.DockerClient(base_url=docker_host, tls=tls_config)
+            else:
+                client = docker.DockerClient(base_url=docker_host)
+            # Test connection
+            client.ping()
+        except Exception as e:
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Docker daemon is unavailable: {str(e)}"
+            )
+    return client
 
 
 class AuthConfig(BaseModel):
@@ -195,14 +212,14 @@ async def run_container(request: RunContainerRequest):
                 "serveraddress": request.auth_config.serveraddress,
             }
         if request.pull_policy == "always":
-            client.images.pull(request.image, auth_config=auth_config)
+            get_docker_client().images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
         volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes or {})
         print(f"volume_binds: {volume_binds}")
         container = None
         try:
             # Run the container
-            container = client.containers.run(
+            container = get_docker_client().containers.run(
                 request.image,
                 command=request.command,
                 entrypoint=request.entrypoint,
@@ -371,7 +388,7 @@ class CreateVolumeResponse(BaseModel):
 
 
 def write_content_to_volume(volume, encoded_content):
-    container = client.containers.run(
+    container = get_docker_client().containers.run(
         "busybox",
         f"sh -c 'echo $ENCODED_CONTENT | base64 -d | tar -C /volume --strip-components=1 -xz'",
         environment={"ENCODED_CONTENT": encoded_content},
@@ -391,9 +408,9 @@ def write_content_to_volume(volume, encoded_content):
     response_model=CreateVolumeResponse,
 )
 async def create_volume(request: CreateVolumeRequest):
-    # volume = client.volumes.get(request.name)
+    # volume = get_docker_client().volumes.get(request.name)
     # if not volume:
-    volume = client.volumes.create(
+    volume = get_docker_client().volumes.create(
         request.name,
         driver=request.driver,
         driver_opts=request.driver_opts,
@@ -410,14 +427,154 @@ async def create_volume(request: CreateVolumeRequest):
 
 @app.get("/health")
 def health():
-    docker_info = client.info()
-    if not docker_info:
-        raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
+    try:
+        docker_info = get_docker_client().info()
+        if not docker_info:
+            raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
+        return {"status": "ok", "docker_version": docker_info.get("ServerVersion", "unknown")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Docker daemon is unavailable: {str(e)}")
 
-    return {"status": "ok"}
+
+# MCP Tool Models
+class ToolRequest(BaseModel):
+    name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+
+class ToolResponse(BaseModel):
+    content: List[Dict[str, str]]
+    isError: Optional[bool] = False
+
+# MCP Endpoints
+@app.get("/mcp")
+async def mcp_root():
+    return {
+        "name": "Docker Runner MCP Server",
+        "version": "1.0.0",
+        "tools": ["run_container", "create_volume", "docker_health"]
+    }
+
+@app.get("/mcp/tools")
+async def list_mcp_tools():
+    return {
+        "tools": [
+            {
+                "name": "run_container",
+                "description": "Run a Docker container",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "image": {"type": "string", "description": "Docker image name"},
+                        "command": {"type": "array", "items": {"type": "string"}, "description": "Command to run"},
+                        "env_vars": {"type": "object", "description": "Environment variables"},
+                        "pull_policy": {"type": "string", "enum": ["always", "never"], "default": "always"}
+                    },
+                    "required": ["image"]
+                }
+            },
+            {
+                "name": "create_volume", 
+                "description": "Create a Docker volume",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Volume name"},
+                        "driver": {"type": "string", "default": "local", "description": "Volume driver"}
+                    },
+                    "required": ["name"]
+                }
+            },
+            {
+                "name": "docker_health",
+                "description": "Check Docker daemon health",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        ]
+    }
+
+@app.post("/mcp/tools/call")
+async def call_mcp_tool(request: ToolRequest):
+    try:
+        if request.name == "run_container":
+            return await mcp_run_container_tool(request.arguments)
+        elif request.name == "create_volume":
+            return await mcp_create_volume_tool(request.arguments)
+        elif request.name == "docker_health":
+            return await mcp_docker_health_tool(request.arguments)
+        else:
+            raise HTTPException(status_code=404, detail=f"Tool '{request.name}' not found")
+    except Exception as e:
+        return ToolResponse(
+            content=[{"type": "text", "text": f"Error: {str(e)}"}],
+            isError=True
+        )
+
+async def mcp_run_container_tool(args: Dict[str, Any]) -> ToolResponse:
+    """Run a Docker container via MCP"""
+    image = args.get("image")
+    command = args.get("command", [])
+    env_vars = args.get("env_vars", {})
+    pull_policy = args.get("pull_policy", "always")
+    
+    try:
+        # Pull image if requested
+        if pull_policy == "always":
+            get_docker_client().images.pull(image)
+        
+        # Run container
+        container = get_docker_client().containers.run(
+            image,
+            command=command,
+            environment=env_vars,
+            remove=True,
+            detach=False,
+        )
+        
+        output = container.decode('utf-8').strip()
+        return ToolResponse(
+            content=[{"type": "text", "text": f"Container executed successfully. Output: {output}"}]
+        )
+    except Exception as e:
+        raise Exception(f"Failed to run container: {str(e)}")
+
+async def mcp_create_volume_tool(args: Dict[str, Any]) -> ToolResponse:
+    """Create a Docker volume via MCP"""
+    name = args.get("name")
+    driver = args.get("driver", "local")
+    
+    try:
+        volume = get_docker_client().volumes.create(name, driver=driver)
+        return ToolResponse(
+            content=[{"type": "text", "text": f"Volume '{name}' created successfully"}]
+        )
+    except Exception as e:
+        raise Exception(f"Failed to create volume: {str(e)}")
+
+async def mcp_docker_health_tool(args: Dict[str, Any]) -> ToolResponse:
+    """Check Docker health via MCP"""
+    try:
+        info = get_docker_client().info()
+        version = info.get("ServerVersion", "unknown")
+        return ToolResponse(
+            content=[{"type": "text", "text": f"Docker is healthy. Version: {version}"}]
+        )
+    except Exception as e:
+        raise Exception(f"Docker health check failed: {str(e)}")
 
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Run with both REST API and MCP on the same port
+    print("🚀 Starting integrated server with both REST API and MCP on port 8000")
+    print("  - REST API: http://localhost:8000/run")
+    print("  - MCP: http://localhost:8000/mcp")
+    print("  - Health: http://localhost:8000/health")
+    print("  - Docs: http://localhost:8000/docs")
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="debug")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

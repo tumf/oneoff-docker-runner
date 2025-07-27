@@ -10,6 +10,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Customize command and entrypoint for container execution
 * Capture and return both stdout and stderr output
 * Create Docker volume with base64 tar.gz image
+* **Integrated MCP (Model Context Protocol) server with SSE support on the same port**
 
 ## Requirements
 
@@ -18,6 +19,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * FastAPI
 * Uvicorn
 * Docker-py
+* FastMCP (for MCP server functionality)
 
 ## Run on localhost 8222 port
 
@@ -88,41 +90,118 @@ curl -X 'POST' \
 
 ## Usage
 
-1. Start the FastAPI server:
-    
+### Integrated Server (REST API + MCP on Same Port)
+
+1. Start the integrated server:
 
 ```bash
-    uvicorn main:app --host 0.0.0.0 --port 8000
+python main.py
 ```
 
+This starts both the REST API and MCP server on port 8000:
+- REST API endpoints: `http://localhost:8000/run`,   `/volume`,   `/health`
+- MCP SSE endpoint: `http://localhost:8000/mcp`
+- API Documentation: `http://localhost:8000/docs`
+
+### REST API Usage
+
 2. Send a POST request to the `/run` endpoint with the following JSON body to run a Docker container:
-    
 
 ```json
-    {
-        "image": "alpine:latest",
-        "command": ["echo", "Hello, World!"],
-        "env_vars": {
-            "MY_VAR": "value"
-        },
-        "auth_config": {
-            "username": "your-username",
-            "password": "your-password",
-            "email": "your-email@example.com",
-            "serveraddress": "https://index.docker.io/v1/"
-        }
+{
+    "image": "alpine:latest",
+    "command": ["echo", "Hello, World!"],
+    "env_vars": {
+        "MY_VAR": "value"
+    },
+    "auth_config": {
+        "username": "your-username",
+        "password": "your-password",
+        "email": "your-email@example.com",
+        "serveraddress": "https://index.docker.io/v1/"
     }
+}
 ```
 
 3. The API will return a JSON response with the stdout and stderr output from the container:
-    
 
 ```json
-    {
-        "status": "success",
-        "stdout": "Hello, World!\n",
-        "stderr": ""
+{
+    "status": "success",
+    "stdout": "Hello, World!\n",
+    "stderr": ""
+}
+```
+
+### MCP Integration (Model Context Protocol)
+
+The integrated server automatically provides MCP functionality alongside the REST API.
+
+#### Available MCP Tools
+
+All REST API endpoints are automatically available as MCP tools:
+- `run`: Run Docker containers with full configuration support
+- `volume`: Create and manage Docker volumes  
+- `health`: Check Docker daemon health
+
+#### Using the MCP Server
+
+The MCP server can be used with any MCP-compatible client:
+
+```python
+from fastmcp import Client
+import asyncio
+
+async def main():
+    # Connect to the integrated MCP server
+    async with Client("http://localhost:8000/mcp") as client:
+        # List available tools
+        tools = await client.list_tools()
+        print(f"Available tools: {[tool.name for tool in tools.tools]}")
+        
+        # Run a Docker container
+        result = await client.call_tool("run", {
+            "image": "alpine:latest",
+            "command": ["echo", "Hello from MCP!"],
+            "env_vars": {"TEST": "value"}
+        })
+        print(f"Container output: {result.text}")
+        
+        # Check Docker health
+        health = await client.call_tool("health", {})
+        print(f"Docker status: {health.text}")
+
+asyncio.run(main())
+```
+
+#### MCP Configuration for AI Clients
+
+For AI clients like Claude Desktop, add this configuration to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "docker-runner": {
+      "url": "http://localhost:8000/mcp"
     }
+  }
+}
+```
+
+#### Example Client
+
+Run the example client to test both REST API and MCP functionality:
+
+```bash
+python example_client.py
+```
+
+#### Running Tests
+
+Test the MCP functionality:
+
+```bash
+python -m pytest tests/test_mcp_server.py -v
 ```
 
 ### POST /run
@@ -172,6 +251,7 @@ Create Docker volume
 $ tar czf tmp.tar.gz target_dir
 $ base64 < tmp.tar.gz
 ```
+
 #### Request Example
 
 Create `my-volume` Docker volume with content.
@@ -301,3 +381,25 @@ For GitHub Container Registry, you need to use your GitHub username and a Person
     }
 }
 ```
+
+## Quick Start Demo
+
+For a quick demonstration of both REST API and MCP functionality:
+
+```bash
+python demo_integrated.py
+```
+
+This will start the integrated server and show examples of how to use both interfaces.
+
+## Architecture
+
+The integrated server provides:
+
+- **Single Port (8000)**: Both REST API and MCP on the same port
+- **FastAPI Integration**: Automatic OpenAPI documentation at `/docs`
+- **MCP Auto-generation**: All REST endpoints automatically available as MCP tools
+- **SSE Transport**: MCP over Server-Sent Events at `/mcp`
+- **Unified Logging**: All requests logged through the same system
+
+This design eliminates the need to manage multiple servers while providing full compatibility with both traditional HTTP clients and MCP-aware AI systems.

@@ -1,6 +1,19 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 WORKDIR /usr/src/app
-COPY . .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy project files
+COPY pyproject.toml uv.lock README.md ./
+COPY main.py ./
+COPY healthcheck.py ./
+
+# Install dependencies
+RUN uv sync --frozen --no-cache
+
+# Expose port for both REST API and MCP
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Run the integrated server with both /run and /mcp endpoints
+CMD ["uv", "run", "python", "main.py"]
