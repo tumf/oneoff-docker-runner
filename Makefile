@@ -10,7 +10,7 @@ VERSION_SUFFIX := $(shell echo $(CURRENT_VERSION) | grep -o -- "-[a-zA-Z0-9]\+" 
 MAJOR := $(shell echo $(VERSION_BASE) | cut -d. -f1)
 MINOR := $(shell echo $(VERSION_BASE) | cut -d. -f2)
 PATCH := $(shell echo $(VERSION_BASE) | cut -d. -f3)
-BETA_NUM := $(shell echo $(CURRENT_VERSION) | grep -o "beta[0-9]\+" | grep -o "[0-9]\+" || echo "0")
+BETA_NUM := $(shell echo $(CURRENT_VERSION) | grep -o "beta[0-9]\+" | sed 's/beta//' || echo "0")
 
 # Function to update version
 define update_version
@@ -71,29 +71,29 @@ all: format lint test
 
 # Bump patch version (0.0.x)
 bump-patch:
-	$(eval NEW_PATCH := $(shell echo $$(($(PATCH) + 1))))
+	$(eval NEW_PATCH := $(shell expr $(PATCH) + 1))
 	$(eval NEW_VERSION := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	$(call update_version,$(NEW_VERSION))
 
 # Bump minor version (0.x.0)
 bump-minor:
-	$(eval NEW_MINOR := $(shell echo $$(($(MINOR) + 1))))
+	$(eval NEW_MINOR := $(shell expr $(MINOR) + 1))
 	$(eval NEW_VERSION := $(MAJOR).$(NEW_MINOR).0)
 	$(call update_version,$(NEW_VERSION))
 
 # Bump major version (x.0.0)
 bump-major:
-	$(eval NEW_MAJOR := $(shell echo $$(($(MAJOR) + 1))))
+	$(eval NEW_MAJOR := $(shell expr $(MAJOR) + 1))
 	$(eval NEW_VERSION := $(NEW_MAJOR).0.0)
 	$(call update_version,$(NEW_VERSION))
 
 # Bump beta version (x.x.x-beta)
 bump-beta:
 	@if echo "$(CURRENT_VERSION)" | grep -q "beta"; then \
-		NEW_BETA_NUM=$$(($(BETA_NUM) + 1)); \
+		NEW_BETA_NUM=`expr $(BETA_NUM) + 1`; \
 		NEW_VERSION="$(VERSION_BASE)-beta$$NEW_BETA_NUM"; \
 	else \
-		NEW_PATCH=$$(($(PATCH) + 1)); \
+		NEW_PATCH=`expr $(PATCH) + 1`; \
 		NEW_VERSION="$(MAJOR).$(MINOR).$$NEW_PATCH-beta1"; \
 	fi; \
 	echo "Updating version to $$NEW_VERSION"; \
