@@ -301,7 +301,7 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
                 archive_path = os.path.join(temp_dir, "archive.tar.gz")
                 with open(archive_path, "wb") as f:
                     f.write(decoded_content)
-                shutil.unpack_archive(archive_path, temp_dir)
+                shutil.unpack_archive(archive_path, temp_dir, filter='data')
                 source_path = temp_dir
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
@@ -535,8 +535,6 @@ async def sse_heartbeat():
             "Access-Control-Allow-Headers": "Cache-Control",
         },
     )
-
-
 
 
 # Manual MCP Protocol Implementation
