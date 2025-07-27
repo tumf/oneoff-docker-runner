@@ -668,11 +668,11 @@ if __name__ == "__main__":
     import uvicorn
 
     # Run with both REST API and MCP on the same port
-    print("🚀 Starting integrated server with both REST API and MCP on port 8001")
-    print("  - REST API: http://localhost:8001/run")
-    print("  - MCP JSON-RPC: http://localhost:8001/mcp")
-    print("  - SSE Heartbeat: http://localhost:8001/sse-heartbeat")
-    print("  - Health: http://localhost:8001/health")
-    print("  - Docs: http://localhost:8001/docs")
+    print("🚀 Starting integrated server with both REST API and MCP on port 8000")
+    print("  - REST API: http://localhost:8000/run")
+    print("  - MCP JSON-RPC: http://localhost:8000/mcp")
+    print("  - SSE Heartbeat: http://localhost:8000/sse-heartbeat")
+    print("  - Health: http://localhost:8000/health")
+    print("  - Docs: http://localhost:8000/docs")
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
