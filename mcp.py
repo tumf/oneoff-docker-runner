@@ -679,6 +679,51 @@ def create_mcp_app():
                 yield f"id: {session_id}-{int(time.time())}\n"
                 yield f"\n"
 
+                # Server initialization info (for n8n compatibility)
+                await asyncio.sleep(0.1)  # Small delay to ensure connection is established
+                
+                server_info_event = {
+                    "type": "server_info",
+                    "sessionId": session_id,
+                    "timestamp": time.time(),
+                    "serverInfo": {
+                        "name": "Docker Runner MCP Server",
+                        "version": "1.0.0",
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}}
+                    }
+                }
+                
+                logger.info(f"📋 SSE EVENT: Sending server info {server_info_event}")
+                yield f"event: server_info\n"
+                yield f"data: {json.dumps(server_info_event)}\n"
+                yield f"id: {session_id}-server-info\n"
+                yield f"\n"
+
+                # Tools available notification (for n8n compatibility)
+                await asyncio.sleep(0.1)
+                
+                tools = []
+                for tool_name, tool_info in MCP_TOOLS.items():
+                    tools.append({
+                        "name": tool_info["name"],
+                        "description": tool_info["description"],
+                        "inputSchema": tool_info["inputSchema"]
+                    })
+                
+                tools_event = {
+                    "type": "tools_available", 
+                    "sessionId": session_id,
+                    "timestamp": time.time(),
+                    "tools": tools
+                }
+                
+                logger.info(f"🛠️ SSE EVENT: Sending tools available ({len(tools)} tools)")
+                yield f"event: tools_available\n"
+                yield f"data: {json.dumps(tools_event)}\n"
+                yield f"id: {session_id}-tools\n"
+                yield f"\n"
+
                 # Heartbeat loop
                 event_id = 0
                 while True:
