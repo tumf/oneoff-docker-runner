@@ -10,7 +10,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Customize command and entrypoint for container execution
 * Capture and return both stdout and stderr output
 * Create Docker volume with base64 tar.gz image
-* **Integrated MCP (Model Context Protocol) server with SSE support on the same port**
+* **Integrated MCP (Model Context Protocol) server with JSON-RPC 2.0 support on the same port**
 
 ## Requirements
 
@@ -19,17 +19,17 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * `uv` (recommended) or `pip` for package management
 * Dependencies managed via `pyproject.toml`
 
-## Run on localhost 8222 port
+## Run on localhost 8223 port
 
 ```bash
-docker run --rm -p 8222:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
+docker run --rm -p 8223:8001 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
 ```
 
 Run One-off docker command like as:
 
 ```bash
 curl -X 'POST' \
-  'http://0.0.0.0:8222/run' \
+  'http://0.0.0.0:8223/run' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -117,10 +117,10 @@ DOCKER_CERT_PATH=/path/to/certs
 python main.py
 ```
 
-This starts both the REST API and MCP server on port 8000:
-- REST API endpoints: `http://localhost:8000/run`,          `/volume`,          `/health`
-- MCP SSE endpoint: `http://localhost:8000/mcp`
-- API Documentation: `http://localhost:8000/docs`
+This starts both the REST API and MCP server on port 8001:
+- REST API endpoints: `http://localhost:8001/run`,          `/volume`,          `/health`
+- MCP JSON-RPC endpoint: `http://localhost:8001/mcp`
+- API Documentation: `http://localhost:8001/docs`
 
 ### REST API Usage
 
@@ -162,7 +162,7 @@ Execute Docker containers directly from AI clients (Claude Desktop, Cursor, etc.
 python main.py
 ```
 
-The server accepts MCP requests at `http://localhost:8000/mcp` .
+The server accepts MCP JSON-RPC 2.0 requests at `http://localhost:8001/mcp` .
 
 #### 2. AI Client Configuration
 
@@ -173,7 +173,7 @@ Add to `claude_desktop_config.json` :
 {
   "mcpServers": {
     "docker-runner": {
-      "url": "http://localhost:8000/mcp"
+      "url": "http://localhost:8001/mcp"
     }
   }
 }
@@ -182,10 +182,10 @@ Add to `claude_desktop_config.json` :
 **Cursor:**
 Add to Cursor settings under "MCP Servers":
 - Name: `docker-runner`  
-- URL: `http://localhost:8000/mcp`
+- URL: `http://localhost:8001/mcp`
 
 **Other MCP-compatible clients:**
-Configure MCP server URL as `http://localhost:8000/mcp` .
+Configure MCP server URL as `http://localhost:8001/mcp` .
 
 #### 3. Available Functions
 
@@ -376,7 +376,7 @@ For GitHub Container Registry, you need to use your GitHub username and a Person
 ### 1. Start the Server
 
 ```bash
-# Start the integrated server (both REST API and MCP on port 8000)
+# Start the integrated server (both REST API and MCP on port 8001)
 uv run python main.py
 
 # Or with pip (if using pip instead of uv)
@@ -386,21 +386,21 @@ python main.py
 Output:
 
 ```
-🚀 Starting integrated server with both REST API and MCP on port 8000
-  - REST API: http://localhost:8000/run
-  - MCP: http://localhost:8000/mcp
-  - Health: http://localhost:8000/health
-  - Docs: http://localhost:8000/docs
+🚀 Starting integrated server with both REST API and MCP on port 8001
+  - REST API: http://localhost:8001/run
+  - MCP JSON-RPC: http://localhost:8001/mcp
+  - Health: http://localhost:8001/health
+  - Docs: http://localhost:8001/docs
 ```
 
 ### 2. Test REST API
 
 ```bash
 # Check server health
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Run a simple container
-curl -X POST http://localhost:8000/run \
+curl -X POST http://localhost:8001/run \
   -H "Content-Type: application/json" \
   -d '{
     "image": "alpine:latest",
@@ -409,7 +409,7 @@ curl -X POST http://localhost:8000/run \
   }'
 
 # Run container with environment variables
-curl -X POST http://localhost:8000/run \
+curl -X POST http://localhost:8001/run \
   -H "Content-Type: application/json" \
   -d '{
     "image": "alpine:latest", 
@@ -434,7 +434,7 @@ async def test_mcp():
     
     # Check if server is running
     try:
-        response = requests.get("http://localhost:8000/health", timeout=5)
+        response = requests.get("http://localhost:8001/health", timeout=5)
         print(f"✅ Server is running: {response.json()}")
     except:
         print("❌ Server not running. Start with: uv run python main.py")
@@ -442,7 +442,7 @@ async def test_mcp():
     
     try:
         # Connect to MCP server
-        async with Client("http://localhost:8000/mcp") as client:
+        async with Client("http://localhost:8001/mcp") as client:
             print("✅ Connected to MCP server!")
             
             # List available tools
@@ -481,14 +481,40 @@ Run the test:
 uv run python test_mcp.py
 ```
 
+### 4. Test MCP Manually (JSON-RPC 2.0)
+
+You can also test the MCP endpoint directly using curl:
+
+```bash
+# Test MCP initialize
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}'
+
+# Test MCP tools list
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}'
+
+# Test run_container tool
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run_container", "arguments": {"image": "alpine:latest", "command": ["echo", "Hello from MCP!"]}}}'
+
+# Test docker_health tool
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "docker_health", "arguments": {}}}'
+```
+
 ## Architecture
 
 The integrated server provides:
 
-- **Single Port (8000)**: Both REST API and MCP on the same port
+- **Single Port (8001)**: Both REST API and MCP on the same port
 - **FastAPI Integration**: Automatic OpenAPI documentation at `/docs`
-- **MCP Auto-generation**: All REST endpoints automatically available as MCP tools
-- **SSE Transport**: MCP over Server-Sent Events at `/mcp`
+- **MCP Implementation**: Manual JSON-RPC 2.0 protocol implementation
+- **JSON-RPC Transport**: MCP over JSON-RPC 2.0 at `/mcp`
 - **Unified Logging**: All requests logged through the same system
 
 This design eliminates the need to manage multiple servers while providing full compatibility with both traditional HTTP clients and MCP-aware AI systems.

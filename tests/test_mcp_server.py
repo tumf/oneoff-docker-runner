@@ -14,9 +14,9 @@ class TestMCPServer:
         """Set up test client"""
         self.client = TestClient(app)
 
-    def test_mcp_root_endpoint(self):
-        """Test MCP root endpoint"""
-        response = self.client.get("/mcp")
+    def test_mcp_info_endpoint(self):
+        """Test MCP info endpoint"""
+        response = self.client.get("/mcp/info")
         assert response.status_code == 200
         data = response.json()
         assert "name" in data
@@ -35,8 +35,6 @@ class TestMCPServer:
         assert "run_container" in tool_names
         assert "create_volume" in tool_names
 
-
-
     @pytest.mark.skip(reason="Docker container tests disabled for CI")
     def test_run_docker_container_simple_disabled(self):
         """Test running a simple Docker container - DISABLED FOR CI"""
@@ -46,10 +44,10 @@ class TestMCPServer:
     # NOTE: The following tests are disabled because they use the old MCP Client API
     # which doesn't work with the current FastAPI-based architecture.
     # These can be re-enabled once proper MCP transport is implemented.
-    
+
     @pytest.mark.skip(reason="MCP Client tests disabled - use HTTP tests instead")
-    def test_run_docker_container_simple_disabled(self):
-        """Test running a simple Docker container - DISABLED"""
+    def test_run_docker_container_mcp_disabled(self):
+        """Test running a simple Docker container via MCP - DISABLED"""
         pass
 
     @pytest.mark.skip(reason="MCP Client tests disabled - use HTTP tests instead")

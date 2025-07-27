@@ -595,9 +595,10 @@ wheels = [
 
 [[package]]
 name = "oneoff-docker-runner"
-version = "0.1.2"
+version = "0.1.3b4"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "docker" },
     { name = "fastapi" },
     { name = "fastmcp" },
@@ -634,6 +635,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'" },
+    { name = "click", specifier = ">=8.0.0" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "fastapi", specifier = ">=0.116.1" },
     { name = "fastmcp", specifier = ">=2.10.6" },
