@@ -666,80 +666,31 @@ def create_mcp_app():
             try:
                 logger.info(f"🚀 SSE STREAM: Starting event stream for session {session_id}")
                 
-                # Connection acknowledgment
-                connection_event = {
-                    "type": "connection",
-                    "sessionId": session_id,
-                    "timestamp": time.time(),
-                }
-
-                logger.info(f"📡 SSE EVENT: Sending connection event {connection_event}")
-                yield f"event: connection\n"
-                yield f"data: {json.dumps(connection_event)}\n"
-                yield f"id: {session_id}-{int(time.time())}\n"
+                # Simple connection acknowledgment (minimal)
+                logger.info(f"🚀 SSE CONNECTION: Session {session_id} established, waiting for client requests")
+                
+                # Send minimal connection ready signal
+                yield f"event: ready\n"
+                yield f"data: {json.dumps({'sessionId': session_id, 'status': 'connected'})}\n"
+                yield f"id: {session_id}-ready\n"
                 yield f"\n"
 
-                # Server initialization info (for n8n compatibility)
-                await asyncio.sleep(0.1)  # Small delay to ensure connection is established
-                
-                server_info_event = {
-                    "type": "server_info",
-                    "sessionId": session_id,
-                    "timestamp": time.time(),
-                    "serverInfo": {
-                        "name": "Docker Runner MCP Server",
-                        "version": "1.0.0",
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}}
-                    }
-                }
-                
-                logger.info(f"📋 SSE EVENT: Sending server info {server_info_event}")
-                yield f"event: server_info\n"
-                yield f"data: {json.dumps(server_info_event)}\n"
-                yield f"id: {session_id}-server-info\n"
-                yield f"\n"
+                # n8n MCP Client compatibility: Don't send automatic events
+                # Wait for client to send requests via POST to trigger responses
+                logger.info(f"🔗 N8N MCP: SSE connection ready, awaiting client requests")
 
-                # Tools available notification (for n8n compatibility)
-                await asyncio.sleep(0.1)
-                
-                tools = []
-                for tool_name, tool_info in MCP_TOOLS.items():
-                    tools.append({
-                        "name": tool_info["name"],
-                        "description": tool_info["description"],
-                        "inputSchema": tool_info["inputSchema"]
-                    })
-                
-                tools_event = {
-                    "type": "tools_available", 
-                    "sessionId": session_id,
-                    "timestamp": time.time(),
-                    "tools": tools
-                }
-                
-                logger.info(f"🛠️ SSE EVENT: Sending tools available ({len(tools)} tools)")
-                yield f"event: tools_available\n"
-                yield f"data: {json.dumps(tools_event)}\n"
-                yield f"id: {session_id}-tools\n"
-                yield f"\n"
-
-                # Heartbeat loop
+                # Keep connection alive with minimal heartbeat
                 event_id = 0
                 while True:
                     await asyncio.sleep(30)  # 30-second heartbeat
 
                     event_id += 1
-                    heartbeat_event = {
-                        "type": "heartbeat",
-                        "sessionId": session_id,
-                        "timestamp": time.time(),
-                    }
-
-                    logger.info(f"💗 SSE HEARTBEAT: Event #{event_id} for session {session_id}")
-                    yield f"event: heartbeat\n"
-                    yield f"data: {json.dumps(heartbeat_event)}\n"
-                    yield f"id: {session_id}-{event_id}\n"
+                    logger.info(f"💗 SSE HEARTBEAT: Keeping session {session_id} alive ({event_id})")
+                    
+                    # Minimal heartbeat
+                    yield f"event: ping\n"
+                    yield f"data: {json.dumps({'sessionId': session_id, 'ping': event_id})}\n"
+                    yield f"id: {session_id}-ping-{event_id}\n"
                     yield f"\n"
 
             except asyncio.CancelledError:
