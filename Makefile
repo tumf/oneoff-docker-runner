@@ -1,10 +1,10 @@
-.PHONY: help install format lint test clean all bump-patch bump-minor bump-major bump-beta release
+.PHONY: help install format lint test clean all bump-patch bump-minor bump-major bump-beta release debug-version
 
 # Version management
 VERSION_FILE := pyproject.toml
 
 # Get current version (macOS compatible)
-CURRENT_VERSION := $(shell grep -o '"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[^"]*"' $(VERSION_FILE) | tr -d '"')
+CURRENT_VERSION := $(shell head -10 $(VERSION_FILE) | grep '^version = ' | sed 's/version = "\(.*\)"/\1/')
 VERSION_BASE := $(shell echo $(CURRENT_VERSION) | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 VERSION_SUFFIX := $(shell echo $(CURRENT_VERSION) | grep -o -- "-[a-zA-Z0-9]\+" || echo "")
 MAJOR := $(shell echo $(VERSION_BASE) | cut -d. -f1)
@@ -37,6 +37,17 @@ help:
 	@echo "  bump-major  - Bump major version (x.0.0)"
 	@echo "  bump-beta   - Bump beta version (x.x.x-beta)"
 	@echo "  release     - Remove beta suffix for release"
+	@echo "  debug-version - Show version variables for debugging"
+
+# Debug version variables
+debug-version:
+	@echo "CURRENT_VERSION: '$(CURRENT_VERSION)'"
+	@echo "VERSION_BASE: '$(VERSION_BASE)'"
+	@echo "VERSION_SUFFIX: '$(VERSION_SUFFIX)'"
+	@echo "MAJOR: '$(MAJOR)'"
+	@echo "MINOR: '$(MINOR)'"
+	@echo "PATCH: '$(PATCH)'"
+	@echo "BETA_NUM: '$(BETA_NUM)'"
 
 # Install dependencies
 install:
@@ -90,7 +101,11 @@ bump-major:
 # Bump beta version (x.x.x-beta)
 bump-beta:
 	@if echo "$(CURRENT_VERSION)" | grep -q "beta"; then \
-		NEW_BETA_NUM=`expr $(BETA_NUM) + 1`; \
+		if [ "$(BETA_NUM)" = "" ] || [ "$(BETA_NUM)" = "0" ]; then \
+			NEW_BETA_NUM=1; \
+		else \
+			NEW_BETA_NUM=`expr $(BETA_NUM) + 1`; \
+		fi; \
 		NEW_VERSION="$(VERSION_BASE)-beta$$NEW_BETA_NUM"; \
 	else \
 		NEW_PATCH=`expr $(PATCH) + 1`; \
