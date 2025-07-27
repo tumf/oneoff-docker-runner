@@ -1,52 +1,31 @@
-import asyncio
-import base64
-import json
-import os
-import shutil
-import tempfile
-import time
-from typing import Any, Dict, List, Literal, Optional, Union
-
-import docker
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from typing import List, Dict, Optional, Literal, Union
+import docker
+import os
+import base64
+import tempfile
+import shutil
+import time
 
-# Integrated FastAPI app with MCP support
-app = FastAPI(title="Docker Runner with MCP Integration")
+app = FastAPI()
 
-# Docker client setup (lazy initialization)
 docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
 tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
 cert_path = os.getenv("DOCKER_CERT_PATH", None)
 
-client = None
-
-
-def get_docker_client():
-    """Get Docker client with lazy initialization and error handling"""
-    global client
-    if client is None:
-        try:
-            if tls_verify == "1" and cert_path:
-                tls_config = docker.tls.TLSConfig(
-                    client_cert=(
-                        os.path.join(cert_path, "cert.pem"),
-                        os.path.join(cert_path, "key.pem"),
-                    ),
-                    ca_cert=os.path.join(cert_path, "ca.pem"),
-                    verify=True,
-                )
-                client = docker.DockerClient(base_url=docker_host, tls=tls_config)
-            else:
-                client = docker.DockerClient(base_url=docker_host)
-            # Test connection
-            client.ping()
-        except Exception as e:
-            raise HTTPException(
-                status_code=503, detail=f"Docker daemon is unavailable: {str(e)}"
-            )
-    return client
+if tls_verify == "1" and cert_path:
+    tls_config = docker.tls.TLSConfig(
+        client_cert=(
+            os.path.join(cert_path, "cert.pem"),
+            os.path.join(cert_path, "key.pem"),
+        ),
+        ca_cert=os.path.join(cert_path, "ca.pem"),
+        verify=True,
+    )
+    client = docker.DockerClient(base_url=docker_host, tls=tls_config)
+else:
+    client = docker.DockerClient(base_url=docker_host)
 
 
 class AuthConfig(BaseModel):
@@ -216,16 +195,14 @@ async def run_container(request: RunContainerRequest):
                 "serveraddress": request.auth_config.serveraddress,
             }
         if request.pull_policy == "always":
-            get_docker_client().images.pull(request.image, auth_config=auth_config)
+            client.images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
-        volume_binds, response_volumes, temp_dirs = prepare_volumes(
-            request.volumes or {}
-        )
+        volume_binds, response_volumes, temp_dirs = prepare_volumes(request.volumes or {})
         print(f"volume_binds: {volume_binds}")
         container = None
         try:
             # Run the container
-            container = get_docker_client().containers.run(
+            container = client.containers.run(
                 request.image,
                 command=request.command,
                 entrypoint=request.entrypoint,
@@ -269,11 +246,11 @@ async def run_container(request: RunContainerRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
-    volume_binds: Dict[str, Dict[str, str]] = {}
-    response_volumes: Dict[str, str] = {}
-    temp_dirs: List[str] = []
-
+def prepare_volumes(volumes):
+    volume_binds = {}
+    response_volumes = {}
+    temp_dirs = []
+    
     if not volumes:
         return volume_binds, response_volumes, temp_dirs
 
@@ -284,8 +261,6 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
 
         if vol_info.type in ["file", "directory"]:
             vol_content = vol_info.content
-            if vol_content is None:
-                continue
             temp_dir = tempfile.mkdtemp()
             temp_dirs.append(temp_dir)
             decoded_content = base64.b64decode(vol_content)
@@ -301,11 +276,11 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
                 archive_path = os.path.join(temp_dir, "archive.tar.gz")
                 with open(archive_path, "wb") as f:
                     f.write(decoded_content)
-                shutil.unpack_archive(archive_path, temp_dir, filter="data")
+                shutil.unpack_archive(archive_path, temp_dir)
                 source_path = temp_dir
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
-            source_path = vol_info.name or ""
+            source_path = vol_info.name
 
         if vol_info.response:
             if vol_info.type == "volume":
@@ -326,13 +301,8 @@ def get_container_logs(container):
     return stdout_output, stderr_output
 
 
-def collect_response_volumes(
-    response_volumes: Dict[str, str], volumes: Optional[Dict[str, VolumeConfig]]
-):
-    response_volume_contents: Dict[str, Optional[Dict[str, str]]] = {}
-    if not volumes:
-        return response_volume_contents
-
+def collect_response_volumes(response_volumes, volumes):
+    response_volume_contents = {}
     for container_path, source_path in response_volumes.items():
         if not os.path.exists(source_path):
             response_volume_contents[container_path] = None
@@ -401,7 +371,7 @@ class CreateVolumeResponse(BaseModel):
 
 
 def write_content_to_volume(volume, encoded_content):
-    container = get_docker_client().containers.run(
+    container = client.containers.run(
         "busybox",
         f"sh -c 'echo $ENCODED_CONTENT | base64 -d | tar -C /volume --strip-components=1 -xz'",
         environment={"ENCODED_CONTENT": encoded_content},
@@ -421,9 +391,9 @@ def write_content_to_volume(volume, encoded_content):
     response_model=CreateVolumeResponse,
 )
 async def create_volume(request: CreateVolumeRequest):
-    # volume = get_docker_client().volumes.get(request.name)
+    # volume = client.volumes.get(request.name)
     # if not volume:
-    volume = get_docker_client().volumes.create(
+    volume = client.volumes.create(
         request.name,
         driver=request.driver,
         driver_opts=request.driver_opts,
@@ -440,439 +410,14 @@ async def create_volume(request: CreateVolumeRequest):
 
 @app.get("/health")
 def health():
-    try:
-        docker_info = get_docker_client().info()
-        if not docker_info:
-            raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
-        return {
-            "status": "ok",
-            "docker_version": docker_info.get("ServerVersion", "unknown"),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Docker daemon is unavailable: {str(e)}"
-        )
+    docker_info = client.info()
+    if not docker_info:
+        raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
 
-
-# MCP Tool Functions (manual implementation)
-async def mcp_run_container(args: Dict[str, Any]) -> str:
-    """Run a Docker container via MCP"""
-    image = args.get("image", "")
-    command = args.get("command", [])
-    env_vars = args.get("env_vars", {})
-    pull_policy = args.get("pull_policy", "always")
-
-    try:
-        # Pull image if requested
-        if pull_policy == "always":
-            get_docker_client().images.pull(image)
-
-        # Run container
-        container = get_docker_client().containers.run(
-            image,
-            command=command,
-            environment=env_vars,
-            remove=True,
-            detach=False,
-        )
-
-        output = container.decode("utf-8").strip()
-        return f"Container executed successfully. Output: {output}"
-    except Exception as e:
-        return f"Failed to run container: {str(e)}"
-
-
-async def mcp_create_volume(args: Dict[str, Any]) -> str:
-    """Create a Docker volume via MCP"""
-    name = args.get("name", "")
-    driver = args.get("driver", "local")
-
-    try:
-        get_docker_client().volumes.create(name, driver=driver)
-        return f"Volume '{name}' created successfully"
-    except Exception as e:
-        return f"Failed to create volume: {str(e)}"
-
-
-async def mcp_docker_health(args: Dict[str, Any]) -> str:
-    """Check Docker daemon health via MCP"""
-    try:
-        docker_info = get_docker_client().info()
-        version = docker_info.get("ServerVersion", "unknown")
-        return f"Docker daemon is healthy. Version: {version}"
-    except Exception as e:
-        return f"Docker daemon is unhealthy: {str(e)}"
-
-
-# MCP Protocol Implementation
-class MCPRequest(BaseModel):
-    jsonrpc: str = "2.0"
-    id: Union[str, int]
-    method: str
-    params: Optional[Dict[str, Any]] = None
-
-
-class MCPResponse(BaseModel):
-    jsonrpc: str = "2.0"
-    id: Union[str, int]
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
-
-    def dict(self, **kwargs) -> Dict[str, Any]:
-        """Convert to dictionary, excluding None values"""
-        response_dict: Dict[str, Any] = {"jsonrpc": self.jsonrpc, "id": self.id}
-        if self.result is not None:
-            response_dict["result"] = self.result
-        if self.error is not None:
-            response_dict["error"] = self.error
-        return response_dict
-
-
-# Standard MCP SSE implementation
-# Global storage for SSE sessions
-sse_sessions: Dict[str, asyncio.Queue] = {}
-
-
-@app.get("/sse")
-async def mcp_sse_endpoint(request: Request):
-    """Standard MCP Server-Sent Events endpoint"""
-    session_id = request.query_params.get("sessionId")
-    if not session_id:
-        session_id = base64.b64encode(os.urandom(16)).decode("utf-8")
-
-    async def event_generator():
-        try:
-            # Send message endpoint information
-            yield f"data: /messages\n\n"
-
-            # Store session for message endpoint
-            sse_sessions[session_id] = asyncio.Queue()
-
-            # Keep connection alive and handle messages
-            while True:
-                try:
-                    # Wait for messages from the message endpoint or timeout for heartbeat
-                    message = await asyncio.wait_for(
-                        sse_sessions[session_id].get(), timeout=30.0
-                    )
-                    yield f"data: {json.dumps(message)}\n\n"
-                except asyncio.TimeoutError:
-                    # Send heartbeat
-                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-                except asyncio.CancelledError:
-                    break
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        finally:
-            # Cleanup session
-            if session_id in sse_sessions:
-                del sse_sessions[session_id]
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "X-Session-Id": session_id,
-        },
-    )
-
-
-@app.post("/messages")
-async def mcp_messages_endpoint(request: MCPRequest, http_request: Request):
-    """Standard MCP messages endpoint for client-to-server communication"""
-    session_id = http_request.query_params.get("sessionId")
-    if not session_id or session_id not in sse_sessions:
-        raise HTTPException(status_code=400, detail="Invalid or missing session ID")
-
-    try:
-        response = None
-
-        if request.method == "initialize":
-            response = MCPResponse(
-                id=request.id,
-                result={
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {
-                        "name": "Docker Runner MCP Server",
-                        "version": "1.0.0",
-                    },
-                },
-            )
-
-        elif request.method == "tools/list":
-            response = MCPResponse(
-                id=request.id,
-                result={
-                    "tools": [
-                        {
-                            "name": "run_container",
-                            "description": "Run a Docker container",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "image": {
-                                        "type": "string",
-                                        "description": "Docker image name",
-                                    },
-                                    "command": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                    "env_vars": {"type": "object"},
-                                    "pull_policy": {
-                                        "type": "string",
-                                        "enum": ["always", "never"],
-                                        "default": "always",
-                                    },
-                                },
-                                "required": ["image"],
-                            },
-                        },
-                        {
-                            "name": "create_volume",
-                            "description": "Create a Docker volume",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Volume name",
-                                    },
-                                    "driver": {"type": "string", "default": "local"},
-                                },
-                                "required": ["name"],
-                            },
-                        },
-                        {
-                            "name": "docker_health",
-                            "description": "Check Docker daemon health",
-                            "inputSchema": {"type": "object", "properties": {}},
-                        },
-                    ]
-                },
-            )
-
-        elif request.method == "tools/call":
-            if not request.params:
-                response = MCPResponse(
-                    id=request.id, error={"code": -32602, "message": "Missing params"}
-                )
-            else:
-                tool_name = request.params.get("name")
-                tool_args = request.params.get("arguments", {})
-
-                if tool_name == "run_container":
-                    result = await mcp_run_container(tool_args)
-                elif tool_name == "create_volume":
-                    result = await mcp_create_volume(tool_args)
-                elif tool_name == "docker_health":
-                    result = await mcp_docker_health(tool_args)
-                else:
-                    response = MCPResponse(
-                        id=request.id,
-                        error={
-                            "code": -32601,
-                            "message": f"Method not found: {tool_name}",
-                        },
-                    )
-
-                if response is None:
-                    response = MCPResponse(
-                        id=request.id,
-                        result={"content": [{"type": "text", "text": result}]},
-                    )
-
-        else:
-            response = MCPResponse(
-                id=request.id,
-                error={
-                    "code": -32601,
-                    "message": f"Method not found: {request.method}",
-                },
-            )
-
-        # Send response back via SSE
-        if response and session_id in sse_sessions:
-            await sse_sessions[session_id].put(response.dict())
-
-        # Return immediate acknowledgment
-        return {"status": "received"}
-
-    except Exception as e:
-        error_response = MCPResponse(
-            id=request.id,
-            error={"code": -32603, "message": f"Internal error: {str(e)}"},
-        )
-        if session_id in sse_sessions:
-            await sse_sessions[session_id].put(error_response.dict())
-        return {"status": "error", "message": str(e)}
-
-
-# Custom SSE heartbeat endpoint for monitoring
-@app.get("/sse-heartbeat")
-async def sse_heartbeat():
-    """Custom SSE heartbeat endpoint for monitoring"""
-
-    async def event_generator():
-        yield f"data: {json.dumps({'type': 'connection', 'status': 'connected'})}\n\n"
-
-        while True:
-            try:
-                await asyncio.sleep(1)
-                yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': time.time()})}\n\n"
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                break
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
-    )
-
-
-# MCP classes moved to top of file for proper import order
-
-
-# Test-only endpoint for backward compatibility with existing tests
-# NOTE: This is NOT part of MCP standard and should only be used for testing
-@app.post("/mcp")
-async def mcp_test_endpoint(request: MCPRequest):
-    """Test-only MCP JSON-RPC 2.0 endpoint for backward compatibility"""
-    try:
-        if request.method == "initialize":
-            return MCPResponse(
-                id=request.id,
-                result={
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {
-                        "name": "Docker Runner MCP Server",
-                        "version": "1.0.0",
-                    },
-                },
-            )
-
-        elif request.method == "tools/list":
-            return MCPResponse(
-                id=request.id,
-                result={
-                    "tools": [
-                        {
-                            "name": "run_container",
-                            "description": "Run a Docker container",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "image": {
-                                        "type": "string",
-                                        "description": "Docker image name",
-                                    },
-                                    "command": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                    "env_vars": {"type": "object"},
-                                    "pull_policy": {
-                                        "type": "string",
-                                        "enum": ["always", "never"],
-                                        "default": "always",
-                                    },
-                                },
-                                "required": ["image"],
-                            },
-                        },
-                        {
-                            "name": "create_volume",
-                            "description": "Create a Docker volume",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Volume name",
-                                    },
-                                    "driver": {"type": "string", "default": "local"},
-                                },
-                                "required": ["name"],
-                            },
-                        },
-                        {
-                            "name": "docker_health",
-                            "description": "Check Docker daemon health",
-                            "inputSchema": {"type": "object", "properties": {}},
-                        },
-                    ]
-                },
-            )
-
-        elif request.method == "tools/call":
-            if not request.params:
-                return MCPResponse(
-                    id=request.id, error={"code": -32602, "message": "Missing params"}
-                )
-            tool_name = request.params.get("name")
-            tool_args = request.params.get("arguments", {})
-
-            if tool_name == "run_container":
-                result = await mcp_run_container(tool_args)
-            elif tool_name == "create_volume":
-                result = await mcp_create_volume(tool_args)
-            elif tool_name == "docker_health":
-                result = await mcp_docker_health(tool_args)
-            else:
-                return MCPResponse(
-                    id=request.id,
-                    error={"code": -32601, "message": f"Method not found: {tool_name}"},
-                )
-
-            return MCPResponse(
-                id=request.id, result={"content": [{"type": "text", "text": result}]}
-            )
-
-        else:
-            return MCPResponse(
-                id=request.id,
-                error={
-                    "code": -32601,
-                    "message": f"Method not found: {request.method}",
-                },
-            )
-
-    except Exception as e:
-        return MCPResponse(
-            id=request.id,
-            error={"code": -32603, "message": f"Internal error: {str(e)}"},
-        )
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    # Run with both REST API and MCP on the same port
-    print(
-        "🚀 Starting integrated server with both REST API and standard MCP on port 8000"
-    )
-    print("  - REST API: http://localhost:8000/run")
-    print("  - MCP SSE (standard): http://localhost:8000/sse")
-    print("  - MCP Messages (standard): http://localhost:8000/messages")
-    print("  - MCP Test (legacy): http://localhost:8000/mcp [TEST ONLY]")
-    print("  - SSE Heartbeat: http://localhost:8000/sse-heartbeat")
-    print("  - Health: http://localhost:8000/health")
-    print("  - Docs: http://localhost:8000/docs")
-
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="debug")
