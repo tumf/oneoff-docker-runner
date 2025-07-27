@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import os
 import time
 import uuid
@@ -10,6 +11,13 @@ import docker
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("mcp_server")
 
 # Docker client setup
 docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
@@ -452,6 +460,91 @@ def create_mcp_app():
     """Create and configure the MCP FastAPI application"""
     app = FastAPI(title="Docker Runner MCP Server", version="1.0.0")
 
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        """Log all requests for debugging"""
+        start_time = time.time()
+        
+        # Get client information
+        client_ip = request.client.host if request.client else "unknown"
+        client_port = request.client.port if request.client else "unknown"
+        
+        # Log basic request info
+        logger.info(f"🔍 REQUEST: {request.method} {request.url}")
+        logger.info(f"   Client: {client_ip}:{client_port}")
+        logger.info(f"   Path: {request.url.path}")
+        logger.info(f"   Query: {str(request.query_params) if request.query_params else 'None'}")
+        
+        # Log detailed headers
+        logger.info("📋 REQUEST HEADERS:")
+        headers = dict(request.headers)
+        
+        # Important headers first
+        important_headers = [
+            "accept", "content-type", "content-length", "user-agent", 
+            "authorization", "mcp-session-id", "x-forwarded-for",
+            "x-real-ip", "host", "referer", "origin"
+        ]
+        
+        for header_name in important_headers:
+            header_value = headers.get(header_name)
+            if header_value:
+                # Truncate very long values
+                display_value = header_value if len(header_value) <= 100 else f"{header_value[:97]}..."
+                logger.info(f"   🔸 {header_name}: {display_value}")
+        
+        # Other headers
+        other_headers = {k: v for k, v in headers.items() 
+                        if k.lower() not in important_headers}
+        if other_headers:
+            logger.info("   📎 Other headers:")
+            for name, value in other_headers.items():
+                display_value = value if len(value) <= 100 else f"{value[:97]}..."
+                logger.info(f"      • {name}: {display_value}")
+        
+        # Log request body info for POST/PUT/PATCH
+        if request.method in ["POST", "PUT", "PATCH"]:
+            content_length = headers.get("content-length", "0")
+            content_type = headers.get("content-type", "unknown")
+            logger.info(f"📦 REQUEST BODY: Content-Length = {content_length} bytes, Content-Type = {content_type}")
+            
+            # Note: We don't read the body here to avoid consuming the stream
+            # The body will be logged in the endpoint handlers if needed
+        
+        try:
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            
+            # Log response details
+            if response.status_code >= 400:
+                logger.warning(f"❌ ERROR RESPONSE: {response.status_code} for {request.method} {request.url.path}")
+                logger.warning(f"   Processing time: {process_time:.3f}s")
+                logger.warning("📤 RESPONSE HEADERS:")
+                for name, value in response.headers.items():
+                    display_value = value if len(value) <= 100 else f"{value[:97]}..."
+                    logger.warning(f"      • {name}: {display_value}")
+            else:
+                logger.info(f"✅ SUCCESS: {response.status_code} for {request.method} {request.url.path} ({process_time:.3f}s)")
+                # Only log response headers for successful requests if they contain important info
+                important_resp_headers = ["content-type", "mcp-session-id", "location", "set-cookie"]
+                logged_headers = []
+                for name, value in response.headers.items():
+                    if name.lower() in important_resp_headers:
+                        display_value = value if len(value) <= 100 else f"{value[:97]}..."
+                        logged_headers.append(f"{name}: {display_value}")
+                if logged_headers:
+                    logger.info(f"   Key response headers: {', '.join(logged_headers)}")
+            
+            return response
+            
+        except Exception as e:
+            process_time = time.time() - start_time
+            logger.error(f"💥 EXCEPTION: {str(e)} for {request.method} {request.url}")
+            logger.error(f"   Processing time: {process_time:.3f}s")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception details: {repr(e)}")
+            raise
+
     @app.options("/mcp")
     @app.options("/sse")  # n8n compatibility
     @app.options("/stream")  # n8n compatibility
@@ -475,12 +568,18 @@ def create_mcp_app():
             session_id = request.headers.get("Mcp-Session-Id")
             if not session_id:
                 session_id = create_session()
+                logger.info(f"🆕 NEW SESSION: Created session {session_id}")
             elif not validate_session(session_id):
                 # Auto-recreate expired session
                 session_id = create_session(session_id)
+                logger.info(f"🔄 RENEWED SESSION: Recreated session {session_id}")
+            else:
+                logger.info(f"📋 EXISTING SESSION: Using session {session_id}")
 
             # Parse request
             body = await request.json()
+            logger.info(f"📥 MCP REQUEST BODY: {json.dumps(body, indent=2)}")
+            
             mcp_request = MCPRequest(**body)
 
             # Handle request
@@ -488,6 +587,7 @@ def create_mcp_app():
 
             if response:
                 response_data = response.model_dump(exclude_none=True)
+                logger.info(f"📤 MCP RESPONSE: {json.dumps(response_data, indent=2)}")
                 return JSONResponse(
                     content=response_data,
                     headers={
@@ -498,6 +598,7 @@ def create_mcp_app():
                 )
             else:
                 # For notifications (no response expected)
+                logger.info(f"📨 MCP NOTIFICATION: No response for {mcp_request.method}")
                 return JSONResponse(
                     content={},
                     status_code=204,
@@ -509,6 +610,10 @@ def create_mcp_app():
                 )
 
         except Exception as e:
+            logger.error(f"💥 MCP PARSE ERROR: {str(e)}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            # Note: Cannot read request body again after JSON parse failure
+            
             return JSONResponse(
                 content={
                     "jsonrpc": "2.0",
@@ -532,7 +637,11 @@ def create_mcp_app():
         """Handle MCP Server-Sent Events via GET"""
         # Check Accept header
         accept_header = request.headers.get("Accept", "")
+        logger.info(f"🔍 SSE REQUEST: Accept header = '{accept_header}'")
+        
         if "text/event-stream" not in accept_header:
+            logger.warning(f"❌ SSE REJECTED: Missing text/event-stream in Accept header")
+            logger.warning(f"   Available headers: {dict(request.headers)}")
             return JSONResponse(
                 content={
                     "error": "SSE endpoint requires Accept: text/event-stream header"
@@ -545,12 +654,18 @@ def create_mcp_app():
         session_id = request.headers.get("Mcp-Session-Id")
         if not session_id:
             session_id = create_session()
+            logger.info(f"🆕 SSE NEW SESSION: Created session {session_id}")
         elif not validate_session(session_id):
             session_id = create_session(session_id)
+            logger.info(f"🔄 SSE RENEWED SESSION: Recreated session {session_id}")
+        else:
+            logger.info(f"📋 SSE EXISTING SESSION: Using session {session_id}")
 
         async def server_event_generator():
             """Generate SSE events for the client"""
             try:
+                logger.info(f"🚀 SSE STREAM: Starting event stream for session {session_id}")
+                
                 # Connection acknowledgment
                 connection_event = {
                     "type": "connection",
@@ -558,6 +673,7 @@ def create_mcp_app():
                     "timestamp": time.time(),
                 }
 
+                logger.info(f"📡 SSE EVENT: Sending connection event {connection_event}")
                 yield f"event: connection\n"
                 yield f"data: {json.dumps(connection_event)}\n"
                 yield f"id: {session_id}-{int(time.time())}\n"
@@ -575,6 +691,7 @@ def create_mcp_app():
                         "timestamp": time.time(),
                     }
 
+                    logger.info(f"💗 SSE HEARTBEAT: Event #{event_id} for session {session_id}")
                     yield f"event: heartbeat\n"
                     yield f"data: {json.dumps(heartbeat_event)}\n"
                     yield f"id: {session_id}-{event_id}\n"
@@ -582,10 +699,13 @@ def create_mcp_app():
 
             except asyncio.CancelledError:
                 # Client disconnected
+                logger.info(f"🔌 SSE DISCONNECT: Client disconnected from session {session_id}")
                 if session_id in sessions:
                     sessions.pop(session_id, None)
+                    logger.info(f"🗑️ SSE CLEANUP: Removed session {session_id}")
                 return
             except Exception as e:
+                logger.error(f"💥 SSE ERROR: {str(e)} in session {session_id}")
                 error_event = {
                     "type": "error",
                     "message": str(e),
@@ -630,6 +750,38 @@ def create_mcp_app():
     async def health_check():
         """Health check endpoint"""
         return {"status": "healthy", "timestamp": time.time()}
+
+    # 404 handler for debugging
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    async def catch_all(request: Request, path: str):
+        """Catch all unmatched routes for debugging"""
+        logger.error(f"🚫 404 NOT FOUND: {request.method} /{path}")
+        logger.error(f"   Full URL: {request.url}")
+        logger.error(f"   Headers: {dict(request.headers)}")
+        logger.error(f"   Query params: {dict(request.query_params)}")
+        
+        try:
+            if request.method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+                if body:
+                    logger.error(f"   Request body: {body}")
+        except Exception as e:
+            logger.error(f"   Could not read request body: {e}")
+        
+        return JSONResponse(
+            content={
+                "error": f"Path /{path} not found",
+                "method": request.method,
+                "available_endpoints": [
+                    "/mcp (POST, GET, DELETE)",
+                    "/sse (POST, GET, DELETE) - n8n compatibility",
+                    "/stream (POST, GET, DELETE) - n8n compatibility", 
+                    "/health (GET)"
+                ]
+            },
+            status_code=404,
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
 
     return app
 
