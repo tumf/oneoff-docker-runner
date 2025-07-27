@@ -170,6 +170,26 @@ def create_mcp_app() -> FastAPI:
     """Create FastAPI app with MCP Streamable HTTP endpoint"""
     app = FastAPI(title="Docker Runner MCP Server")
 
+    def get_session_id(request: Request) -> str:
+        """Get or create session ID from request"""
+        session_id = request.headers.get("mcp-session-id")
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            # Initialize new session
+            active_sessions[session_id] = {"initialized": False, "created_at": time.time()}
+        return session_id
+
+    def validate_session(session_id: str) -> bool:
+        """Validate session exists and is active"""
+        if session_id not in active_sessions:
+            return False
+        # Optional: Check session expiry
+        session = active_sessions[session_id]
+        if time.time() - session.get("created_at", 0) > 3600:  # 1 hour timeout
+            del active_sessions[session_id]
+            return False
+        return True
+
     async def handle_mcp_request(
         request: MCPRequest, session_id: str
     ) -> Optional[MCPResponse]:
@@ -188,7 +208,11 @@ def create_mcp_app() -> FastAPI:
                     },
                 )
                 # Initialize session
-                active_sessions[session_id] = {"initialized": True}
+                active_sessions[session_id] = {
+                    "initialized": True, 
+                    "created_at": time.time(),
+                    "protocol_version": "2024-11-05"
+                }
                 return response
 
             elif request.method == "notifications/initialized":
@@ -326,13 +350,11 @@ def create_mcp_app() -> FastAPI:
             )
 
     @app.post("/mcp")
-    async def mcp_endpoint(request: Request):
-        """MCP Streamable HTTP endpoint"""
+    async def mcp_post_endpoint(request: Request):
+        """MCP Streamable HTTP POST endpoint - Client to Server messages"""
 
         # Get or create session ID
-        session_id = request.headers.get("mcp-session-id")
-        if not session_id:
-            session_id = str(uuid.uuid4())
+        session_id = get_session_id(request)
 
         # Parse request body
         try:
@@ -345,68 +367,18 @@ def create_mcp_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
 
-        # Check Accept header to determine response type
-        accept_header = request.headers.get("accept", "application/json")
+        # Validate session for non-initialization requests
+        if mcp_request.method != "initialize" and not validate_session(session_id):
+            raise HTTPException(status_code=404, detail="Session not found or expired")
 
-        if "text/event-stream" in accept_header:
-            # SSE streaming response
-            async def event_generator():
-                try:
-                    yield ": stream opened\n\n"
+        # Handle request
+        response = await handle_mcp_request(mcp_request, session_id)
 
-                    response = await handle_mcp_request(mcp_request, session_id)
-                    if response is not None:
-                        response_data = response.model_dump(exclude_none=True)
-                        yield f"data: {json.dumps(response_data)}\n\n"
-
-                    # Keep-alive heartbeat
-                    while True:
-                        await asyncio.sleep(30)
-                        yield ": keep-alive\n\n"
-
-                except asyncio.CancelledError:
-                    return
-                except Exception as e:
-                    error_response = MCPResponse(
-                        id=mcp_request.id,
-                        error={"code": -32603, "message": f"Internal error: {str(e)}"},
-                    )
-                    yield f"data: {json.dumps(error_response.model_dump(exclude_none=True))}\n\n"
-
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
-                    "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
-                    "Access-Control-Allow-Credentials": "true",
-                    "Mcp-Session-Id": session_id,
-                },
-            )
-        else:
-            # Regular JSON response
-            response = await handle_mcp_request(mcp_request, session_id)
-
-            # Handle notifications (no response)
-            if response is None:
-                return JSONResponse(
-                    content={},
-                    status_code=202,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
-                        "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
-                        "Access-Control-Allow-Credentials": "true",
-                        "Mcp-Session-Id": session_id,
-                    },
-                )
-
-            # Regular response
+        # Handle notifications (no response)
+        if response is None:
             return JSONResponse(
-                content=[response.model_dump(exclude_none=True)],
+                content={},
+                status_code=202,
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
@@ -415,6 +387,119 @@ def create_mcp_app() -> FastAPI:
                     "Mcp-Session-Id": session_id,
                 },
             )
+
+        # Regular JSON response
+        return JSONResponse(
+            content=[response.model_dump(exclude_none=True)],
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
+                "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
+                "Access-Control-Allow-Credentials": "true",
+                "Mcp-Session-Id": session_id,
+            },
+        )
+
+    @app.get("/mcp")
+    async def mcp_get_endpoint(request: Request):
+        """MCP Streamable HTTP GET endpoint - Server to Client SSE stream"""
+
+        # Check Accept header
+        accept_header = request.headers.get("accept", "")
+        if "text/event-stream" not in accept_header:
+            raise HTTPException(
+                status_code=406, 
+                detail="Accept header must include 'text/event-stream'"
+            )
+
+        # Get session ID (required for GET)
+        session_id = request.headers.get("mcp-session-id")
+        if not session_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="Mcp-Session-Id header is required for GET requests"
+            )
+
+        # Validate session
+        if not validate_session(session_id):
+            raise HTTPException(status_code=404, detail="Session not found or expired")
+
+        # Check Last-Event-ID for resumability
+        last_event_id = request.headers.get("last-event-id")
+
+        async def server_event_generator():
+            """Generate server-initiated SSE events"""
+            event_id = 0
+            try:
+                # Send connection confirmation
+                event_id += 1
+                yield f"id: {event_id}\n"
+                yield f"event: connection\n"
+                yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
+
+                # If resuming, indicate resume point
+                if last_event_id:
+                    event_id += 1
+                    yield f"id: {event_id}\n"
+                    yield f"event: resume\n"
+                    yield f"data: {json.dumps({'type': 'resumed', 'last_event_id': last_event_id})}\n\n"
+
+                # Server-initiated messages can be sent here
+                # For now, just send periodic heartbeats
+                while True:
+                    await asyncio.sleep(30)  # 30 second heartbeat
+                    event_id += 1
+                    yield f"id: {event_id}\n"
+                    yield f"event: heartbeat\n"
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': int(time.time())})}\n\n"
+
+            except asyncio.CancelledError:
+                # Client disconnected
+                return
+            except Exception as e:
+                # Send error and close
+                event_id += 1
+                yield f"id: {event_id}\n"
+                yield f"event: error\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+        return StreamingResponse(
+            server_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
+                "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
+                "Access-Control-Allow-Credentials": "true",
+                "Mcp-Session-Id": session_id,
+            },
+        )
+
+    @app.delete("/mcp")
+    async def mcp_delete_endpoint(request: Request):
+        """MCP Session termination endpoint"""
+        session_id = request.headers.get("mcp-session-id")
+        if not session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Mcp-Session-Id header is required for DELETE requests"
+            )
+
+        # Remove session
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+
+        return JSONResponse(
+            content={"message": "Session terminated successfully"},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
+                "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
+                "Access-Control-Allow-Credentials": "true",
+            },
+        )
 
     @app.options("/mcp")
     async def mcp_options():
@@ -423,7 +508,7 @@ def create_mcp_app() -> FastAPI:
             content={},
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Methods": "POST, GET, DELETE, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, Mcp-Session-Id, Last-Event-ID",
                 "Access-Control-Expose-Headers": "Content-Type, Authorization, x-api-key, Mcp-Session-Id",
                 "Access-Control-Allow-Credentials": "true",
@@ -441,6 +526,8 @@ if __name__ == "__main__":
     print("🚀 Starting MCP Server on port 8001")
     print("  - MCP Streamable HTTP endpoint: http://localhost:8001/mcp")
     print("  - Protocol: MCP Streamable HTTP (2024-11-05)")
-    print("  - Supports both JSON and SSE responses based on Accept header")
+    print("  - POST: Client → Server messages (JSON responses)")
+    print("  - GET: Server → Client SSE stream")
+    print("  - DELETE: Session termination")
 
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=False, log_level="info")
