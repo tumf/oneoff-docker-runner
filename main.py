@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import docker
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -301,7 +301,7 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
                 archive_path = os.path.join(temp_dir, "archive.tar.gz")
                 with open(archive_path, "wb") as f:
                     f.write(decoded_content)
-                shutil.unpack_archive(archive_path, temp_dir, filter='data')
+                shutil.unpack_archive(archive_path, temp_dir, filter="data")
                 source_path = temp_dir
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
@@ -506,7 +506,215 @@ async def mcp_docker_health(args: Dict[str, Any]) -> str:
         return f"Docker daemon is unhealthy: {str(e)}"
 
 
-# MCP endpoints will be provided by FastMCP sse_app()
+# MCP Protocol Implementation
+class MCPRequest(BaseModel):
+    jsonrpc: str = "2.0"
+    id: Union[str, int]
+    method: str
+    params: Optional[Dict[str, Any]] = None
+
+
+class MCPResponse(BaseModel):
+    jsonrpc: str = "2.0"
+    id: Union[str, int]
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
+
+    def dict(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary, excluding None values"""
+        response_dict: Dict[str, Any] = {"jsonrpc": self.jsonrpc, "id": self.id}
+        if self.result is not None:
+            response_dict["result"] = self.result
+        if self.error is not None:
+            response_dict["error"] = self.error
+        return response_dict
+
+
+# Standard MCP SSE implementation
+# Global storage for SSE sessions
+sse_sessions: Dict[str, asyncio.Queue] = {}
+
+
+@app.get("/sse")
+async def mcp_sse_endpoint(request: Request):
+    """Standard MCP Server-Sent Events endpoint"""
+    session_id = request.query_params.get("sessionId")
+    if not session_id:
+        session_id = base64.b64encode(os.urandom(16)).decode("utf-8")
+
+    async def event_generator():
+        try:
+            # Send message endpoint information
+            yield f"data: /messages\n\n"
+
+            # Store session for message endpoint
+            sse_sessions[session_id] = asyncio.Queue()
+
+            # Keep connection alive and handle messages
+            while True:
+                try:
+                    # Wait for messages from the message endpoint or timeout for heartbeat
+                    message = await asyncio.wait_for(
+                        sse_sessions[session_id].get(), timeout=30.0
+                    )
+                    yield f"data: {json.dumps(message)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send heartbeat
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                except asyncio.CancelledError:
+                    break
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Cleanup session
+            if session_id in sse_sessions:
+                del sse_sessions[session_id]
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "X-Session-Id": session_id,
+        },
+    )
+
+
+@app.post("/messages")
+async def mcp_messages_endpoint(request: MCPRequest, http_request: Request):
+    """Standard MCP messages endpoint for client-to-server communication"""
+    session_id = http_request.query_params.get("sessionId")
+    if not session_id or session_id not in sse_sessions:
+        raise HTTPException(status_code=400, detail="Invalid or missing session ID")
+
+    try:
+        response = None
+
+        if request.method == "initialize":
+            response = MCPResponse(
+                id=request.id,
+                result={
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {
+                        "name": "Docker Runner MCP Server",
+                        "version": "1.0.0",
+                    },
+                },
+            )
+
+        elif request.method == "tools/list":
+            response = MCPResponse(
+                id=request.id,
+                result={
+                    "tools": [
+                        {
+                            "name": "run_container",
+                            "description": "Run a Docker container",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "image": {
+                                        "type": "string",
+                                        "description": "Docker image name",
+                                    },
+                                    "command": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "env_vars": {"type": "object"},
+                                    "pull_policy": {
+                                        "type": "string",
+                                        "enum": ["always", "never"],
+                                        "default": "always",
+                                    },
+                                },
+                                "required": ["image"],
+                            },
+                        },
+                        {
+                            "name": "create_volume",
+                            "description": "Create a Docker volume",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Volume name",
+                                    },
+                                    "driver": {"type": "string", "default": "local"},
+                                },
+                                "required": ["name"],
+                            },
+                        },
+                        {
+                            "name": "docker_health",
+                            "description": "Check Docker daemon health",
+                            "inputSchema": {"type": "object", "properties": {}},
+                        },
+                    ]
+                },
+            )
+
+        elif request.method == "tools/call":
+            if not request.params:
+                response = MCPResponse(
+                    id=request.id, error={"code": -32602, "message": "Missing params"}
+                )
+            else:
+                tool_name = request.params.get("name")
+                tool_args = request.params.get("arguments", {})
+
+                if tool_name == "run_container":
+                    result = await mcp_run_container(tool_args)
+                elif tool_name == "create_volume":
+                    result = await mcp_create_volume(tool_args)
+                elif tool_name == "docker_health":
+                    result = await mcp_docker_health(tool_args)
+                else:
+                    response = MCPResponse(
+                        id=request.id,
+                        error={
+                            "code": -32601,
+                            "message": f"Method not found: {tool_name}",
+                        },
+                    )
+
+                if response is None:
+                    response = MCPResponse(
+                        id=request.id,
+                        result={"content": [{"type": "text", "text": result}]},
+                    )
+
+        else:
+            response = MCPResponse(
+                id=request.id,
+                error={
+                    "code": -32601,
+                    "message": f"Method not found: {request.method}",
+                },
+            )
+
+        # Send response back via SSE
+        if response and session_id in sse_sessions:
+            await sse_sessions[session_id].put(response.dict())
+
+        # Return immediate acknowledgment
+        return {"status": "received"}
+
+    except Exception as e:
+        error_response = MCPResponse(
+            id=request.id,
+            error={"code": -32603, "message": f"Internal error: {str(e)}"},
+        )
+        if session_id in sse_sessions:
+            await sse_sessions[session_id].put(error_response.dict())
+        return {"status": "error", "message": str(e)}
+
+
 # Custom SSE heartbeat endpoint for monitoring
 @app.get("/sse-heartbeat")
 async def sse_heartbeat():
@@ -537,24 +745,14 @@ async def sse_heartbeat():
     )
 
 
-# Manual MCP Protocol Implementation
-class MCPRequest(BaseModel):
-    jsonrpc: str = "2.0"
-    id: Union[str, int]
-    method: str
-    params: Optional[Dict[str, Any]] = None
+# MCP classes moved to top of file for proper import order
 
 
-class MCPResponse(BaseModel):
-    jsonrpc: str = "2.0"
-    id: Union[str, int]
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
-
-
+# Test-only endpoint for backward compatibility with existing tests
+# NOTE: This is NOT part of MCP standard and should only be used for testing
 @app.post("/mcp")
-async def mcp_jsonrpc_endpoint(request: MCPRequest):
-    """MCP JSON-RPC 2.0 endpoint"""
+async def mcp_test_endpoint(request: MCPRequest):
+    """Test-only MCP JSON-RPC 2.0 endpoint for backward compatibility"""
     try:
         if request.method == "initialize":
             return MCPResponse(
@@ -666,9 +864,13 @@ if __name__ == "__main__":
     import uvicorn
 
     # Run with both REST API and MCP on the same port
-    print("🚀 Starting integrated server with both REST API and MCP on port 8000")
+    print(
+        "🚀 Starting integrated server with both REST API and standard MCP on port 8000"
+    )
     print("  - REST API: http://localhost:8000/run")
-    print("  - MCP JSON-RPC: http://localhost:8000/mcp")
+    print("  - MCP SSE (standard): http://localhost:8000/sse")
+    print("  - MCP Messages (standard): http://localhost:8000/messages")
+    print("  - MCP Test (legacy): http://localhost:8000/mcp [TEST ONLY]")
     print("  - SSE Heartbeat: http://localhost:8000/sse-heartbeat")
     print("  - Health: http://localhost:8000/health")
     print("  - Docs: http://localhost:8000/docs")

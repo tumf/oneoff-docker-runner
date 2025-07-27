@@ -10,7 +10,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Customize command and entrypoint for container execution
 * Capture and return both stdout and stderr output
 * Create Docker volume with base64 tar.gz image
-* **Integrated MCP (Model Context Protocol) server with JSON-RPC 2.0 support on the same port**
+* **Integrated MCP (Model Context Protocol) server with standard SSE transport on the same port**
 
 ## Requirements
 
@@ -22,7 +22,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 ## Run on localhost 8223 port
 
 ```bash
-docker run --rm -p 8223:8001 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
+docker run --rm -p 8223:8000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/tumf/oneoff-docker-runner
 ```
 
 Run One-off docker command like as:
@@ -117,10 +117,11 @@ DOCKER_CERT_PATH=/path/to/certs
 python main.py
 ```
 
-This starts both the REST API and MCP server on port 8001:
-- REST API endpoints: `http://localhost:8001/run`,          `/volume`,          `/health`
-- MCP JSON-RPC endpoint: `http://localhost:8001/mcp`
-- API Documentation: `http://localhost:8001/docs`
+This starts both the REST API and MCP server on port 8000:
+- REST API endpoints: `http://localhost:8000/run`,        `/volume`,        `/health`
+- MCP SSE endpoint: `http://localhost:8000/sse` (standard transport)
+- MCP Messages endpoint: `http://localhost:8000/messages` (standard transport)
+- API Documentation: `http://localhost:8000/docs`
 
 ### REST API Usage
 
@@ -154,7 +155,7 @@ This starts both the REST API and MCP server on port 8001:
 
 ### MCP Server (Model Context Protocol)
 
-Execute Docker containers directly from AI clients (Claude Desktop, Cursor, etc.).
+Execute Docker containers directly from AI clients (Claude Desktop, Cursor, n8n, etc.) using standard MCP SSE transport.
 
 #### 1. Start Server
 
@@ -162,9 +163,16 @@ Execute Docker containers directly from AI clients (Claude Desktop, Cursor, etc.
 python main.py
 ```
 
-The server accepts MCP JSON-RPC 2.0 requests at `http://localhost:8001/mcp` .
+The server provides standard MCP SSE transport at:
+- SSE endpoint: `http://localhost:8000/sse`
+- Messages endpoint: `http://localhost:8000/messages`
 
 #### 2. AI Client Configuration
+
+**n8n MCP Client Tool:**
+- SSE Endpoint: `http://localhost:8000/sse`
+- Authentication: None
+- Tools to Include: All
 
 **Claude Desktop:**
 Add to `claude_desktop_config.json` :
@@ -173,7 +181,8 @@ Add to `claude_desktop_config.json` :
 {
   "mcpServers": {
     "docker-runner": {
-      "url": "http://localhost:8001/mcp"
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-stdio", "http://localhost:8000/sse"]
     }
   }
 }
@@ -181,11 +190,11 @@ Add to `claude_desktop_config.json` :
 
 **Cursor:**
 Add to Cursor settings under "MCP Servers":
-- Name: `docker-runner`  
-- URL: `http://localhost:8001/mcp`
+- Name: `docker-runner`
+- URL: `http://localhost:8000/sse`
 
 **Other MCP-compatible clients:**
-Configure MCP server URL as `http://localhost:8001/mcp` .
+Configure MCP server SSE URL as `http://localhost:8000/sse` .
 
 #### 3. Available Functions
 
@@ -376,7 +385,7 @@ For GitHub Container Registry, you need to use your GitHub username and a Person
 ### 1. Start the Server
 
 ```bash
-# Start the integrated server (both REST API and MCP on port 8001)
+# Start the integrated server (both REST API and MCP on port 8000)
 uv run python main.py
 
 # Or with pip (if using pip instead of uv)
@@ -386,21 +395,22 @@ python main.py
 Output:
 
 ```
-🚀 Starting integrated server with both REST API and MCP on port 8001
-  - REST API: http://localhost:8001/run
-  - MCP JSON-RPC: http://localhost:8001/mcp
-  - Health: http://localhost:8001/health
-  - Docs: http://localhost:8001/docs
+🚀 Starting integrated server with both REST API and standard MCP on port 8000
+  - REST API: http://localhost:8000/run
+  - MCP SSE (standard): http://localhost:8000/sse
+  - MCP Messages (standard): http://localhost:8000/messages
+  - Health: http://localhost:8000/health
+  - Docs: http://localhost:8000/docs
 ```
 
 ### 2. Test REST API
 
 ```bash
 # Check server health
-curl http://localhost:8001/health
+curl http://localhost:8000/health
 
 # Run a simple container
-curl -X POST http://localhost:8001/run \
+curl -X POST http://localhost:8000/run \
   -H "Content-Type: application/json" \
   -d '{
     "image": "alpine:latest",
@@ -409,7 +419,7 @@ curl -X POST http://localhost:8001/run \
   }'
 
 # Run container with environment variables
-curl -X POST http://localhost:8001/run \
+curl -X POST http://localhost:8000/run \
   -H "Content-Type: application/json" \
   -d '{
     "image": "alpine:latest", 
@@ -419,102 +429,76 @@ curl -X POST http://localhost:8001/run \
   }'
 ```
 
-### 3. Test MCP (Using Python Client)
+### 3. Test MCP SSE (Standard Transport)
 
-Create a test file `test_mcp.py` :
-
-```python
-#!/usr/bin/env python3
-import asyncio
-import requests
-from fastmcp import Client
-
-async def test_mcp():
-    print("🔧 Testing MCP API")
-    
-    # Check if server is running
-    try:
-        response = requests.get("http://localhost:8001/health", timeout=5)
-        print(f"✅ Server is running: {response.json()}")
-    except:
-        print("❌ Server not running. Start with: uv run python main.py")
-        return
-    
-    try:
-        # Connect to MCP server
-        async with Client("http://localhost:8001/mcp") as client:
-            print("✅ Connected to MCP server!")
-            
-            # List available tools
-            tools = await client.list_tools()
-            print(f"🛠️ Available tools: {[tool.name for tool in tools.tools]}")
-            
-            # Test container run
-            result = await client.call_tool("run_container", {
-                "image": "alpine:latest",
-                "command": ["echo", "Hello from MCP!"],
-                "pull_policy": "always"
-            })
-            print(f"🐳 Container result: {result.text}")
-            
-            # Test volume creation
-            result = await client.call_tool("create_volume", {
-                "name": "mcp-test-volume",
-                "driver": "local"
-            })
-            print(f"🗃️ Volume result: {result.text}")
-            
-            # Test Docker health
-            result = await client.call_tool("docker_health", {})
-            print(f"💊 Health result: {result.text}")
-            
-    except Exception as e:
-        print(f"❌ MCP test failed: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(test_mcp())
-```
-
-Run the test:
+Test the standard MCP SSE implementation:
 
 ```bash
-uv run python test_mcp.py
+# Test SSE connection (should show message endpoint)
+curl -N "http://localhost:8000/sse?sessionId=test123"
+
+# In another terminal, send initialize message
+curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {}
+    }
+  }'
+
+# List available tools
+curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list"
+  }'
+
+# Run a container
+curl -X POST "http://localhost:8000/messages?sessionId=test123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "run_container",
+      "arguments": {
+        "image": "alpine:latest",
+        "command": ["echo", "Hello from MCP SSE!"]
+      }
+    }
+  }'
 ```
 
-### 4. Test MCP Manually (JSON-RPC 2.0)
+### 4. Integration with AI Clients
 
-You can also test the MCP endpoint directly using curl:
+The server is now compatible with standard MCP clients:
 
-```bash
-# Test MCP initialize
-curl -X POST http://localhost:8001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}'
+**n8n Integration:**
+1. Add MCP Client Tool node to your workflow
+2. Configure SSE Endpoint: `http://localhost:8000/sse`
+3. Set Authentication to None
+4. Select Tools to Include: All
+5. Use the available tools (run_container, create_volume, docker_health) in your workflows
 
-# Test MCP tools list
-curl -X POST http://localhost:8001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}'
-
-# Test run_container tool
-curl -X POST http://localhost:8001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run_container", "arguments": {"image": "alpine:latest", "command": ["echo", "Hello from MCP!"]}}}'
-
-# Test docker_health tool
-curl -X POST http://localhost:8001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "docker_health", "arguments": {}}}'
-```
+**Claude Desktop/Cursor:**
+Configure the MCP server in your client settings using the SSE endpoint `http://localhost:8000/sse` to enable AI-powered Docker container management.
 
 ## Architecture
 
 The integrated server provides:
 
-- **Single Port (8001)**: Both REST API and MCP on the same port
+- **Single Port (8000)**: Both REST API and MCP on the same port
 - **FastAPI Integration**: Automatic OpenAPI documentation at `/docs`
-- **MCP Implementation**: Manual JSON-RPC 2.0 protocol implementation
-- **JSON-RPC Transport**: MCP over JSON-RPC 2.0 at `/mcp`
+- **Standard MCP Implementation**: SSE (Server-Sent Events) transport protocol
+- **MCP Endpoints**: `/sse` for SSE connections and `/messages` for JSON-RPC 2.0 messages
+- **Session Management**: Proper session handling for MCP connections
 - **Unified Logging**: All requests logged through the same system
 
-This design eliminates the need to manage multiple servers while providing full compatibility with both traditional HTTP clients and MCP-aware AI systems.
+This design eliminates the need to manage multiple servers while providing full compatibility with both traditional HTTP clients and standard MCP-aware AI systems like n8n, Claude Desktop, and Cursor.
