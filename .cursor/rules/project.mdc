@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+- main.py listen 8000 port as default. `/run` `/volume` `/health`
+- mcp.py listen 80001 port as default `/mcp` => [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)
