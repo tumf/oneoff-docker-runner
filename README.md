@@ -14,12 +14,10 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 
 ## Requirements
 
-* Python 3.9 or higher
+* Python 3.10 or higher
 * Docker
-* FastAPI
-* Uvicorn
-* Docker-py
-* FastMCP (for MCP server functionality)
+* `uv` (recommended) or `pip` for package management
+* Dependencies managed via `pyproject.toml`
 
 ## Run on localhost 8222 port
 
@@ -56,36 +54,57 @@ curl -X 'POST' \
 
 ## Installation
 
-1. Clone the repository:
-    
+### Option 1: Using uv (Recommended)
+
+1. Install `uv` if you haven't already:
 
 ```bash
-    git clone https://github.com/tumf/oneoff-docker-runner.git
-    cd oneoff-docker-runner
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. Clone the repository:
+
+```bash
+git clone https://github.com/tumf/oneoff-docker-runner.git
+cd oneoff-docker-runner
+```
+
+3. Install dependencies and create virtual environment:
+
+```bash
+uv sync
+```
+
+### Option 2: Using pip
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/tumf/oneoff-docker-runner.git
+cd oneoff-docker-runner
 ```
 
 2. Create and activate a virtual environment:
-    
 
 ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
 ```
 
 3. Install the dependencies:
-    
 
 ```bash
-    pip install -r requirements.txt
+pip install -e .
 ```
 
-4. Create a `.env` file in the project root (if needed) to set environment variables for Docker:
-    
+### Environment Configuration
+
+Create a `.env` file in the project root (if needed) to set environment variables for Docker:
 
 ```env
-    DOCKER_HOST=tcp://your-docker-host:2376
-    DOCKER_TLS_VERIFY=1
-    DOCKER_CERT_PATH=/path/to/certs
+DOCKER_HOST=tcp://your-docker-host:2376
+DOCKER_TLS_VERIFY=1
+DOCKER_CERT_PATH=/path/to/certs
 ```
 
 ## Usage
@@ -99,7 +118,7 @@ python main.py
 ```
 
 This starts both the REST API and MCP server on port 8000:
-- REST API endpoints: `http://localhost:8000/run`,   `/volume`,   `/health`
+- REST API endpoints: `http://localhost:8000/run`,        `/volume`,        `/health`
 - MCP SSE endpoint: `http://localhost:8000/mcp`
 - API Documentation: `http://localhost:8000/docs`
 
@@ -146,32 +165,54 @@ All REST API endpoints are automatically available as MCP tools:
 
 #### Using the MCP Server
 
-The MCP server can be used with any MCP-compatible client:
+The MCP server can be used with any MCP-compatible client. Here's a complete example:
 
 ```python
 from fastmcp import Client
 import asyncio
+import requests
 
-async def main():
+async def test_mcp_integration():
+    """Test both REST API and MCP functionality"""
+    
+    # First, verify server is running
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=5)
+        print(f"✅ Server status: {response.json()}")
+    except:
+        print("❌ Server not running. Start with: uv run python main.py")
+        return
+    
     # Connect to the integrated MCP server
     async with Client("http://localhost:8000/mcp") as client:
+        print("✅ Connected to MCP server!")
+        
         # List available tools
         tools = await client.list_tools()
-        print(f"Available tools: {[tool.name for tool in tools.tools]}")
+        print(f"🛠️ Available tools: {[tool.name for tool in tools.tools]}")
         
         # Run a Docker container
-        result = await client.call_tool("run", {
+        result = await client.call_tool("run_container", {
             "image": "alpine:latest",
             "command": ["echo", "Hello from MCP!"],
-            "env_vars": {"TEST": "value"}
+            "env_vars": {"TEST": "production"},
+            "pull_policy": "always"
         })
-        print(f"Container output: {result.text}")
+        print(f"🐳 Container output: {result.text}")
+        
+        # Create a volume
+        result = await client.call_tool("create_volume", {
+            "name": "test-volume-mcp",
+            "driver": "local"
+        })
+        print(f"🗃️ Volume creation: {result.text}")
         
         # Check Docker health
-        health = await client.call_tool("health", {})
-        print(f"Docker status: {health.text}")
+        health = await client.call_tool("docker_health", {})
+        print(f"💊 Docker status: {health.text}")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(test_mcp_integration())
 ```
 
 #### MCP Configuration for AI Clients
@@ -186,14 +227,6 @@ For AI clients like Claude Desktop, add this configuration to your MCP settings:
     }
   }
 }
-```
-
-#### Example Client
-
-Run the example client to test both REST API and MCP functionality:
-
-```bash
-python example_client.py
 ```
 
 #### Running Tests
@@ -382,15 +415,115 @@ For GitHub Container Registry, you need to use your GitHub username and a Person
 }
 ```
 
-## Quick Start Demo
+## Quick Start
 
-For a quick demonstration of both REST API and MCP functionality:
+### 1. Start the Server
 
 ```bash
-python demo_integrated.py
+# Start the integrated server (both REST API and MCP on port 8000)
+uv run python main.py
+
+# Or with pip (if using pip instead of uv)
+python main.py
 ```
 
-This will start the integrated server and show examples of how to use both interfaces.
+Output:
+
+```
+🚀 Starting integrated server with both REST API and MCP on port 8000
+  - REST API: http://localhost:8000/run
+  - MCP: http://localhost:8000/mcp
+  - Health: http://localhost:8000/health
+  - Docs: http://localhost:8000/docs
+```
+
+### 2. Test REST API
+
+```bash
+# Check server health
+curl http://localhost:8000/health
+
+# Run a simple container
+curl -X POST http://localhost:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "alpine:latest",
+    "command": ["echo", "Hello from REST API!"],
+    "pull_policy": "always"
+  }'
+
+# Run container with environment variables
+curl -X POST http://localhost:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "alpine:latest", 
+    "command": ["sh", "-c", "echo \"Env var: $TEST_VAR\""],
+    "env_vars": {"TEST_VAR": "production"},
+    "pull_policy": "always"
+  }'
+```
+
+### 3. Test MCP (Using Python Client)
+
+Create a test file `test_mcp.py` :
+
+```python
+#!/usr/bin/env python3
+import asyncio
+import requests
+from fastmcp import Client
+
+async def test_mcp():
+    print("🔧 Testing MCP API")
+    
+    # Check if server is running
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=5)
+        print(f"✅ Server is running: {response.json()}")
+    except:
+        print("❌ Server not running. Start with: uv run python main.py")
+        return
+    
+    try:
+        # Connect to MCP server
+        async with Client("http://localhost:8000/mcp") as client:
+            print("✅ Connected to MCP server!")
+            
+            # List available tools
+            tools = await client.list_tools()
+            print(f"🛠️ Available tools: {[tool.name for tool in tools.tools]}")
+            
+            # Test container run
+            result = await client.call_tool("run_container", {
+                "image": "alpine:latest",
+                "command": ["echo", "Hello from MCP!"],
+                "pull_policy": "always"
+            })
+            print(f"🐳 Container result: {result.text}")
+            
+            # Test volume creation
+            result = await client.call_tool("create_volume", {
+                "name": "mcp-test-volume",
+                "driver": "local"
+            })
+            print(f"🗃️ Volume result: {result.text}")
+            
+            # Test Docker health
+            result = await client.call_tool("docker_health", {})
+            print(f"💊 Health result: {result.text}")
+            
+    except Exception as e:
+        print(f"❌ MCP test failed: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(test_mcp())
+```
+
+Run the test:
+
+```bash
+uv run python test_mcp.py
+```
 
 ## Architecture
 
