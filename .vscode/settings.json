@@ -5,6 +5,7 @@
     "httpx",
     "pyproject",
     "someclientid",
-    "somekeyid"
+    "somekeyid",
+    "Streamable"
   ]
 }
