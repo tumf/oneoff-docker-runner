@@ -1,6 +1,7 @@
 import base64
 import os
 import shutil
+import tarfile
 import tempfile
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -281,7 +282,16 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
                 archive_path = os.path.join(temp_dir, "archive.tar.gz")
                 with open(archive_path, "wb") as f:
                     f.write(decoded_content)
-                shutil.unpack_archive(archive_path, temp_dir)
+                
+                # Use safe extraction with explicit filter for Python 3.12+
+                if hasattr(tarfile, 'data_filter'):
+                    # Python 3.12+ with data filter for security
+                    with tarfile.open(archive_path, 'r:gz') as tar:
+                        tar.extractall(temp_dir, filter=tarfile.data_filter)
+                else:
+                    # Fallback for older Python versions
+                    shutil.unpack_archive(archive_path, temp_dir)
+                
                 source_path = temp_dir
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
