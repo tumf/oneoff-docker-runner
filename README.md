@@ -129,7 +129,7 @@ docker run -d --name oneoff-docker-runner \
 ```
 
 This starts:
-- **REST API** (main.py): `http://localhost:8000` - `/run`,  `/volume`,  `/health`,  `/docs`
+- **REST API** (main.py): `http://localhost:8000` - `/run`,   `/volume`,   `/health`,   `/docs`
 - **MCP Server** (mcp.py): `http://localhost:8001` - `/mcp` (Streamable HTTP)
 
 ### REST API Usage
@@ -519,6 +519,60 @@ The MCP server is compatible with standard MCP clients:
 4. Select Tools to Include: All
 5. Use the available tools (run_container, create_volume, docker_health, list_containers, list_images) in your workflows
 
+### n8n MCP Client Node Compatibility
+
+This server has been optimized for compatibility with n8n's MCP Client Node:
+
+**Enhanced Features:**
+- **Accept Header Flexibility**: Supports both `text/event-stream` and mixed content types like `application/json, text/event-stream`
+- **Automatic Initialization**: SSE connections automatically perform MCP initialization sequence
+- **Auto Tools Discovery**: Tools list is immediately sent upon SSE connection for instant availability
+- **Streamable HTTP Support**: POST requests can return SSE responses based on Accept header
+- **Enhanced CORS**: Full CORS support with extended headers for web-based clients
+
+**Connection Modes:**
+1. **SSE Mode** (GET /mcp): Long-lived connection with automatic tool discovery
+2. **Streamable HTTP** (POST /mcp): Single request/response with optional SSE streaming
+3. **Legacy HTTP** (POST /mcp): Standard JSON request/response
+
+**Troubleshooting n8n Connection Issues:**
+
+If tools/list is not loading in n8n MCP Client Node:
+
+1. **Check Accept Headers**: Ensure your reverse proxy doesn't strip Accept headers
+2. **Disable Compression**: For Traefik/NGINX, disable gzip for `/mcp` endpoints:
+   
+
+```nginx
+   location /mcp {
+       gzip off;
+       proxy_buffering off;
+       proxy_cache off;
+   }
+   ```
+
+3. **HTTPS Requirements**: Use HTTPS in production (MCP clients often require it)
+4. **Session Management**: Check logs for session creation and tool list transmission
+5. **Network Paths**: Use container names, not localhost, in Docker environments
+
+**Debug Commands:**
+
+```bash
+# Test SSE connection
+curl -H "Accept: text/event-stream" http://localhost:8001/mcp
+
+# Test tools/list via POST
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+
+# Test with n8n-style Accept header
+curl -X POST http://localhost:8001/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+```
+
 **Claude Desktop/Cursor:**
 Configure the MCP server in your client settings using the endpoint `http://localhost:8001/mcp` to enable AI-powered Docker container management.
 
@@ -528,7 +582,7 @@ The dual-server architecture provides:
 
 - **REST API Server** (port 8000): Traditional HTTP REST API for direct integration
   - FastAPI with automatic OpenAPI documentation at `/docs`
-  - Endpoints: `/run`,  `/volume`,  `/health`
+  - Endpoints: `/run`,   `/volume`,   `/health`
   - Direct Docker container execution
   
 - **MCP Server** (port 8001): Model Context Protocol for AI agent integration
