@@ -89,7 +89,7 @@ class VolumeConfig(BaseModel):
         description="Whether to return the volume",
         json_schema_extra={"example": True},
     )
-    type: Literal["file", "directory", "volume"] = Field(
+    type: Literal["file", "directory", "volume", "host"] = Field(
         ..., description="Type of the volume", json_schema_extra={"example": "file"}
     )
     mode: Optional[str] = Field(
@@ -99,6 +99,11 @@ class VolumeConfig(BaseModel):
         None,
         description="Name of the volume (only use when type=volume)",
         json_schema_extra={"example": "my-volume"},
+    )
+    host_path: Optional[str] = Field(
+        None,
+        description="Absolute host path to bind mount when type=host",
+        json_schema_extra={"example": "/absolute/path/on/host"},
     )
 
 
@@ -272,7 +277,11 @@ async def run_container(request: RunContainerRequest):
         if status != "success":
             raise HTTPException(status_code=500, detail=result)
         return result
+    except HTTPException:
+        # Propagate HTTPException as-is for correct status codes
+        raise
     except Exception as e:
+        # Convert unexpected exceptions into 500
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -322,6 +331,29 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
                 print(f"wrote directory: {source_path}")
         elif vol_info.type == "volume":
             source_path = vol_info.name or ""
+        elif vol_info.type == "host":
+            if not vol_info.host_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"host_path is required when type=host for container path '{container_path}'",
+                )
+            host_realpath = os.path.realpath(vol_info.host_path)
+            if not os.path.isabs(host_realpath):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"host_path must be an absolute path: '{vol_info.host_path}'",
+                )
+            if not os.path.exists(host_realpath):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"host_path does not exist: '{vol_info.host_path}'",
+                )
+            if vol_info.response:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"response is not supported for host type mounts (container path '{container_path}')",
+                )
+            source_path = host_realpath
 
         if vol_info.response:
             if vol_info.type == "volume":
