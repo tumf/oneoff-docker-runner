@@ -11,6 +11,7 @@ OneOffDockerPython is a REST API service built with FastAPI that allows you to r
 * Capture and return both stdout and stderr output
 * Create Docker volume with base64 tar.gz image
 * **Separate MCP (Model Context Protocol) server with Streamable HTTP transport**
+* Bind mount host files/directories into the container (`type: "host"`)
 
 ## Requirements
 
@@ -238,7 +239,10 @@ All parameters conform to the Pydantic schemas in `main.py` ( `RunContainerReque
 
 Notes for volumes key:
 - Key format: `<container_path>[:ro|:rw]`, e.g.,   `/app/data`,   `/etc/config:ro`
-- Bind source is a temporary host directory/file expanded from `content`, or an existing Docker volume name when `type=volume`
+- Bind source is:
+  - a temporary host directory/file expanded from `content` for `type=file|directory`
+  - an existing Docker volume name when `type=volume`
+  - an absolute host path provided via `host_path` when `type=host`
 
 ##### AuthConfig
 
@@ -253,11 +257,12 @@ Notes for volumes key:
 
 | Field | Type | Required | Default | Applies to | Description |
 |------|------|----------|---------|------------|-------------|
-| type | "file" | "directory" | "volume" | Yes | - | all | Volume definition type |
+| type | "file" | "directory" | "volume" | "host" | Yes | - | all | Volume definition type |
 | content | base64 string | Conditionally | null | file, directory | For `file` , provide raw file bytes (base64). For `directory` , provide a `tar.gz` (base64) of the directory |
 | response | boolean | No | false | file, directory | Whether to return the mounted content in the API response after execution |
 | mode | string (e.g. "0644") | No | null | file | File permission for the created file |
 | name | string | Conditionally | null | volume | Existing Docker volume name (required when `type=volume` ) |
+| host_path | string | Conditionally | null | host | Absolute host path to bind mount (required when `type=host`) |
 
 Directory content format:
 - For `directory`,  `content` must be a base64 of a `tar.gz` archive created from the target directory (e.g.,   `tar czf dir.tar.gz dir && base64 < dir.tar.gz`).
@@ -300,6 +305,22 @@ Directory content format:
 Notes:
 - When `pull_policy` is `always`, the image is pulled and `auth_config` is used if provided.
 - For `type=volume` with `response: true`, the content is not returned in the response (current behavior).
+- For `type=host`, `response` is not supported and will be rejected.
+
+#### Host bind example
+
+Minimal request to bind a host file and directory:
+
+```json
+{
+  "image": "alpine:latest",
+  "command": ["sh", "-c", "ls -la /app && cat /app/host.txt || true"],
+  "volumes": {
+    "/app/host.txt:ro": { "type": "host", "host_path": "/absolute/path/to/host.txt" },
+    "/app/data": { "type": "host", "host_path": "/absolute/path/to/dir" }
+  }
+}
+```
 
 #### Response Body (RunContainerResponse)
 
