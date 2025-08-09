@@ -130,7 +130,7 @@ docker run -d --name oneoff-docker-runner \
 ```
 
 This starts:
-- **REST API** (main.py): `http://localhost:8000` - `/run`,      `/volume`,      `/health`,      `/docs`
+- **REST API** (main.py): `http://localhost:8000` - `/run`,        `/volume`,        `/health`,        `/docs`
 - **MCP Server** (mcp.py): `http://localhost:8001` - `/mcp` (Streamable HTTP)
 
 ### REST API Usage
@@ -238,7 +238,7 @@ All parameters conform to the Pydantic schemas in `main.py` ( `RunContainerReque
 | volumes | object<string, VolumeConfig> | No | null | Mount settings. Keys are container-side paths (optional suffix `:ro` / `:rw` , default `rw` ) |
 
 Notes for volumes key:
-- Key format: `<container_path>[:ro|:rw]`, e.g.,   `/app/data`,   `/etc/config:ro`
+- Key format: `<container_path>[:ro|:rw]`, e.g.,     `/app/data`,     `/etc/config:ro`
 - Bind source is:
   - a temporary host directory/file expanded from `content` for `type=file|directory`
   - an existing Docker volume name when `type=volume`
@@ -262,10 +262,10 @@ Notes for volumes key:
 | response | boolean | No | false | file, directory | Whether to return the mounted content in the API response after execution |
 | mode | string (e.g. "0644") | No | null | file | File permission for the created file |
 | name | string | Conditionally | null | volume | Existing Docker volume name (required when `type=volume` ) |
-| host_path | string | Conditionally | null | host | Absolute host path to bind mount (required when `type=host`) |
+| host_path | string | Conditionally | null | host | Absolute host path to bind mount (required when `type=host` ) |
 
 Directory content format:
-- For `directory`,  `content` must be a base64 of a `tar.gz` archive created from the target directory (e.g.,   `tar czf dir.tar.gz dir && base64 < dir.tar.gz`).
+- For `directory`,  `content` must be a base64 of a `tar.gz` archive created from the target directory (e.g.,     `tar czf dir.tar.gz dir && base64 < dir.tar.gz`).
 
 #### Request Example
 
@@ -305,7 +305,7 @@ Directory content format:
 Notes:
 - When `pull_policy` is `always`, the image is pulled and `auth_config` is used if provided.
 - For `type=volume` with `response: true`, the content is not returned in the response (current behavior).
-- For `type=host`, `response` is not supported and will be rejected.
+- For `type=host`,  `response` is not supported and will be rejected.
 
 #### Host bind example
 
@@ -677,7 +677,7 @@ The dual-server architecture provides:
 
 - **REST API Server** (port 8000): Traditional HTTP REST API for direct integration
   - FastAPI with automatic OpenAPI documentation at `/docs`
-  - Endpoints: `/run`,      `/volume`,      `/health`
+  - Endpoints: `/run`,        `/volume`,        `/health`
   - Direct Docker container execution
   
 - **MCP Server** (port 8001): Model Context Protocol for AI agent integration
