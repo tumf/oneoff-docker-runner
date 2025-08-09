@@ -2,6 +2,10 @@
 alwaysApply: true
 ---
 
+## Basic Rules
+
+* All documents and comments in codes should be written in English
+
 ## Endpoints
 
 - main.py listen 8000 port as default. `/run` `/volume` `/health`
