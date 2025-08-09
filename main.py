@@ -332,28 +332,24 @@ def prepare_volumes(volumes: Optional[Dict[str, VolumeConfig]]):
         elif vol_info.type == "volume":
             source_path = vol_info.name or ""
         elif vol_info.type == "host":
+            # Validate only the string form; existence is evaluated on the Docker daemon host.
             if not vol_info.host_path:
                 raise HTTPException(
                     status_code=400,
                     detail=f"host_path is required when type=host for container path '{container_path}'",
                 )
-            host_realpath = os.path.realpath(vol_info.host_path)
-            if not os.path.isabs(host_realpath):
+            host_path_str = vol_info.host_path
+            if not os.path.isabs(host_path_str):
                 raise HTTPException(
                     status_code=400,
                     detail=f"host_path must be an absolute path: '{vol_info.host_path}'",
-                )
-            if not os.path.exists(host_realpath):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"host_path does not exist: '{vol_info.host_path}'",
                 )
             if vol_info.response:
                 raise HTTPException(
                     status_code=400,
                     detail=f"response is not supported for host type mounts (container path '{container_path}')",
                 )
-            source_path = host_realpath
+            source_path = host_path_str
 
         if vol_info.response:
             if vol_info.type == "volume":
