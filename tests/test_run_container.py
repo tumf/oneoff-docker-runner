@@ -2,18 +2,55 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from main import app
+from main import app, get_docker_client
 
 client = TestClient(app)
 
 
-@patch("docker.models.containers.ContainerCollection.run")
-def test_run_container(mock_run):
-    # Mock the container object and its methods
-    mock_container = MagicMock()
-    mock_container.logs.side_effect = [b"stdout", b"stderr"]
-    mock_container.wait.return_value = {"StatusCode": 0}
-    mock_run.return_value = mock_container
+def _dummy_client():
+    class _DummyContainer:
+        def wait(self):
+            return {"StatusCode": 0}
+
+        def logs(self, stdout=False, stderr=False):
+            if stdout:
+                return b"stdout"
+            if stderr:
+                return b"stderr"
+            return b""
+
+        def remove(self):
+            return None
+
+    class _DummyContainers:
+        def run(self, *args, **kwargs):
+            return _DummyContainer()
+
+    class _DummyImages:
+        def pull(self, *args, **kwargs):
+            return None
+
+    class _DummyVolume:
+        def __init__(self, name: str):
+            self.name = name
+
+    class _DummyVolumes:
+        def create(self, name: str, **kwargs):
+            return _DummyVolume(name)
+
+    class _DummyClient:
+        containers = _DummyContainers()
+        images = _DummyImages()
+        volumes = _DummyVolumes()
+
+        def info(self):
+            return {"status": "ok"}
+
+    return _DummyClient()
+
+
+@patch("main.get_docker_client", side_effect=_dummy_client)
+def test_run_container(_mock_get_client):
 
     request_payload = {
         "image": "alpine:latest",

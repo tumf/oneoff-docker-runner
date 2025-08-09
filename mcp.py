@@ -822,7 +822,8 @@ def create_mcp_app():
                     yield f"id: {session_id}-tools\n"
                     yield f"\n"
                     tool_names = [
-                        tool["name"] for tool in (tools_response.result or {}).get("tools", [])
+                        tool["name"]
+                        for tool in (tools_response.result or {}).get("tools", [])
                     ]
                     logger.info(
                         f"✅ AUTO TOOLS: Tools list sent for session {session_id} - {len(tool_names)} tools available: {', '.join(tool_names)}"
@@ -928,7 +929,7 @@ def create_mcp_app():
                 if body:
                     # Decode bytes safely for logging
                     try:
-                        body_str = body.decode('utf-8')
+                        body_str = body.decode("utf-8")
                         logger.error(f"   Request body: {body_str}")
                     except UnicodeDecodeError:
                         logger.error(f"   Request body (binary): {body!r}")

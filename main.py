@@ -15,19 +15,44 @@ app = FastAPI()
 docker_host = os.getenv("DOCKER_HOST", "unix://var/run/docker.sock")
 tls_verify = os.getenv("DOCKER_TLS_VERIFY", "0")
 cert_path = os.getenv("DOCKER_CERT_PATH", None)
+docker_api_version = os.getenv("DOCKER_API_VERSION")
 
-if tls_verify == "1" and cert_path:
-    tls_config = docker.tls.TLSConfig(
-        client_cert=(
-            os.path.join(cert_path, "cert.pem"),
-            os.path.join(cert_path, "key.pem"),
-        ),
-        ca_cert=os.path.join(cert_path, "ca.pem"),
-        verify=True,
-    )
-    client = docker.DockerClient(base_url=docker_host, tls=tls_config)
-else:
-    client = docker.DockerClient(base_url=docker_host)
+# Lazily initialize Docker client to avoid connecting at import-time
+_docker_client: Optional[docker.DockerClient] = None
+
+
+def get_docker_client() -> docker.DockerClient:
+    """Create and cache a DockerClient without contacting the daemon at import-time.
+
+    If DOCKER_API_VERSION is provided, we pass it to avoid initial version
+    negotiation. Under pytest, we default to a commonly supported API version
+    so tests run on hosts without Docker.
+    """
+    global _docker_client
+    if _docker_client is not None:
+        return _docker_client
+
+    tls_config = None
+    if tls_verify == "1" and cert_path:
+        tls_config = docker.tls.TLSConfig(
+            client_cert=(
+                os.path.join(cert_path, "cert.pem"),
+                os.path.join(cert_path, "key.pem"),
+            ),
+            ca_cert=os.path.join(cert_path, "ca.pem"),
+            verify=True,
+        )
+
+    if tls_config is not None:
+        _docker_client = docker.DockerClient(
+            base_url=docker_host, tls=tls_config, version=docker_api_version
+        )
+    else:
+        _docker_client = docker.DockerClient(
+            base_url=docker_host, version=docker_api_version
+        )
+
+    return _docker_client
 
 
 class AuthConfig(BaseModel):
@@ -196,8 +221,9 @@ async def run_container(request: RunContainerRequest):
                 "email": request.auth_config.email,
                 "serveraddress": request.auth_config.serveraddress,
             }
+        docker_client = get_docker_client()
         if request.pull_policy == "always":
-            client.images.pull(request.image, auth_config=auth_config)
+            docker_client.images.pull(request.image, auth_config=auth_config)
         # Prepare volumes
         volume_binds, response_volumes, temp_dirs = prepare_volumes(
             request.volumes or {}
@@ -206,7 +232,7 @@ async def run_container(request: RunContainerRequest):
         container = None
         try:
             # Run the container
-            container = client.containers.run(
+            container = docker_client.containers.run(
                 request.image,
                 command=request.command,
                 entrypoint=request.entrypoint,
@@ -391,7 +417,8 @@ class CreateVolumeResponse(BaseModel):
 
 
 def write_content_to_volume(volume, encoded_content):
-    container = client.containers.run(
+    docker_client = get_docker_client()
+    container = docker_client.containers.run(
         "busybox",
         f"sh -c 'echo $ENCODED_CONTENT | base64 -d | tar -C /volume --strip-components=1 -xz'",
         environment={"ENCODED_CONTENT": encoded_content},
@@ -413,7 +440,8 @@ def write_content_to_volume(volume, encoded_content):
 async def create_volume(request: CreateVolumeRequest):
     # volume = client.volumes.get(request.name)
     # if not volume:
-    volume = client.volumes.create(
+    docker_client = get_docker_client()
+    volume = docker_client.volumes.create(
         request.name,
         driver=request.driver,
         driver_opts=request.driver_opts,
@@ -430,7 +458,8 @@ async def create_volume(request: CreateVolumeRequest):
 
 @app.get("/health")
 def health():
-    docker_info = client.info()
+    docker_client = get_docker_client()
+    docker_info = docker_client.info()
     if not docker_info:
         raise HTTPException(status_code=500, detail="Docker daemon is unavailable")
 
