@@ -129,7 +129,7 @@ docker run -d --name oneoff-docker-runner \
 ```
 
 This starts:
-- **REST API** (main.py): `http://localhost:8000` - `/run`,   `/volume`,   `/health`,   `/docs`
+- **REST API** (main.py): `http://localhost:8000` - `/run`,      `/volume`,      `/health`,      `/docs`
 - **MCP Server** (mcp.py): `http://localhost:8001` - `/mcp` (Streamable HTTP)
 
 ### REST API Usage
@@ -220,42 +220,116 @@ Configure MCP server URL as `http://localhost:8001/mcp` .
 
 ### POST /run
 
-Execute one-off docker container
+Run a one-off Docker container.
+
+All parameters conform to the Pydantic schemas in `main.py` ( `RunContainerRequest` , `AuthConfig` , `VolumeConfig` ). The following documents every field.
+
+#### Request Body (RunContainerRequest)
+
+| Field | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| image | string | Yes | - | Docker image to run (e.g., `alpine:latest` ) |
+| command | string or string[] | No | null | Command to run in the container (e.g., `["echo", "Hello"]` or `"echo Hello"` ) |
+| entrypoint | string or string[] | No | null | Entrypoint for the container (e.g., `["/bin/sh", "-c"]` ) |
+| env_vars | object<string, string|number|boolean> | No | null | Environment variables passed to the container |
+| pull_policy | string (enum: "always" or "never") | No | "always" | Image pull policy. "always": always pull image, "never": use local image only |
+| auth_config | object | No | null | Registry auth. See AuthConfig below |
+| volumes | object<string, VolumeConfig> | No | null | Mount settings. Keys are container-side paths (optional suffix `:ro` / `:rw` , default `rw` ) |
+
+Notes for volumes key:
+- Key format: `<container_path>[:ro|:rw]`, e.g.,   `/app/data`,   `/etc/config:ro`
+- Bind source is a temporary host directory/file expanded from `content`, or an existing Docker volume name when `type=volume`
+
+##### AuthConfig
+
+| Field | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| username | string | Yes | - | Registry username (for GCR use `_json_key` ) |
+| password | string | Yes | - | Registry password (for GCR use the entire service account JSON encoded in base64) |
+| email | string | No | null | Registry email |
+| serveraddress | string | No | `https://index.docker.io/v1/` | Registry server address |
+
+##### VolumeConfig
+
+| Field | Type | Required | Default | Applies to | Description |
+|------|------|----------|---------|------------|-------------|
+| type | "file" | "directory" | "volume" | Yes | - | all | Volume definition type |
+| content | base64 string | Conditionally | null | file, directory | For `file` , provide raw file bytes (base64). For `directory` , provide a `tar.gz` (base64) of the directory |
+| response | boolean | No | false | file, directory | Whether to return the mounted content in the API response after execution |
+| mode | string (e.g. "0644") | No | null | file | File permission for the created file |
+| name | string | Conditionally | null | volume | Existing Docker volume name (required when `type=volume` ) |
+
+Directory content format:
+- For `directory`,  `content` must be a base64 of a `tar.gz` archive created from the target directory (e.g.,   `tar czf dir.tar.gz dir && base64 < dir.tar.gz`).
 
 #### Request Example
 
-Use the following `curl` command to make a POST request to the `/run` endpoint. Replace the placeholders with your actual image details and authentication information.
-
 ```json
 {
-  "image": "your-registry/your-image:tag",
-  "command": ["echo", "Hello, World!"],
-  "env_vars": {
-    "MY_VAR": "value"
+  "image": "alpine:latest",
+  "command": ["/bin/sh", "-c", "echo Hello > /mnt/out.txt && ls -l /mnt"],
+  "entrypoint": null,
+  "env_vars": {"MY_VAR": "value", "FLAG": true, "NUM": 123},
+  "pull_policy": "always",
+  "auth_config": {
+    "username": "your-username",
+    "password": "your-password",
+    "email": "your-email@example.com",
+    "serveraddress": "https://index.docker.io/v1/"
   },
-  "pull_policy": "always"
+  "volumes": {
+    "/mnt/in:ro": {
+      "type": "directory",
+      "content": "<base64-of-tar-gz>",
+      "response": false
+    },
+    "/mnt/out": {
+      "type": "directory",
+      "content": "<base64-of-empty-tar-gz>",
+      "response": true
+    },
+    "/mnt/script.sh:ro": {
+      "type": "file",
+      "mode": "0755",
+      "content": "<base64-of-script>"
+    }
+  }
 }
 ```
 
-#### Request Parameters
+Notes:
+- When `pull_policy` is `always`, the image is pulled and `auth_config` is used if provided.
+- For `type=volume` with `response: true`, the content is not returned in the response (current behavior).
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| pull_policy | string | No | "always" | Image pull policy. Possible values: "always" (always pull image), "never" (use local image only) |
+#### Response Body (RunContainerResponse)
+
+| Field | Type | Description |
+|------|------|-------------|
+| status | string | `success` or `error: <exit_code>` |
+| stdout | string | Full standard output |
+| stderr | string | Full standard error output |
+| volumes | object<string, {type: "file"|"directory", content: base64 string}> | Base64-encoded content for `file` / `directory` where `response: true` was requested |
+| execution_time | number | Execution time in seconds (float) |
+
+Error handling:
+- If the container exits with a non-zero code, the API returns HTTP 500, and the above object is included in the `detail` field.
 
 #### Response Example
-
-The API will return a JSON response with the `stdout` and `stderr` output from the container:
 
 ```json
 {
   "status": "success",
   "stdout": "Hello, World!\n",
-  "stderr": ""
+  "stderr": "",
+  "volumes": {
+    "/mnt/out": {
+      "type": "directory",
+      "content": "<base64-of-tar-gz>"
+    }
+  },
+  "execution_time": 1.234
 }
 ```
-
-This example demonstrates how to use the API to run a one-off Docker container with specified image, command, environment variables, and authentication information. The response will include the standard output and standard error from the executed command within the container.
 
 ### POST /volume
 
@@ -582,7 +656,7 @@ The dual-server architecture provides:
 
 - **REST API Server** (port 8000): Traditional HTTP REST API for direct integration
   - FastAPI with automatic OpenAPI documentation at `/docs`
-  - Endpoints: `/run`,   `/volume`,   `/health`
+  - Endpoints: `/run`,      `/volume`,      `/health`
   - Direct Docker container execution
   
 - **MCP Server** (port 8001): Model Context Protocol for AI agent integration
